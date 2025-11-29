@@ -1,0 +1,87 @@
+name: Build and Publish Extension
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-attach:
+    name: Build and Attach Assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Requis pour uploader les assets dans la release
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js (for crx3)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      # 3. Build Chrome ZIP
+      # On garde le manifest.json original (MV3 Chrome standard)
+      - name: Create Chrome ZIP
+        run: |
+          zip -r chrome-extension.zip . -x "*.git*" -x ".github/*" -x "*.pem" -x "*.DS_Store"
+          echo "Chrome ZIP created."
+
+      # 4. Build Firefox ZIP (Specialized)
+      - name: Create Firefox ZIP
+        run: |
+          mkdir firefox_dist
+          # Copie propre des fichiers
+          rsync -av --exclude='chrome-extension.zip' --exclude='.git' --exclude='.github' . firefox_dist/
+
+          cd firefox_dist
+
+          jq '.browser_specific_settings = { "gecko": { "id": "55082b69-ecc1-46ce-8dcd-90c30df203b1" } }' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+          
+          zip -r ../firefox-extension.xpi .
+          cd ..
+          rm -rf firefox_dist
+          echo "Firefox ZIP created."
+
+      # 5. Build CRX (Signed for manual installation)
+      - name: Install CRX tool and Pack
+        id: pack_crx
+        if: ${{ secrets.CRX_PRIVATE_KEY != '' }}
+        run: |
+          npm install -g crx3
+          echo "${{ secrets.CRX_PRIVATE_KEY }}" > private.pem
+          # On ignore les zips que l'on vient de créer pour ne pas les inclure dans le CRX
+          crx3 pack . -p private.pem -o extension.crx -x ".git" -x ".github" -x "chrome-extension.zip" -x "firefox-extension.zip" -x "private.pem"
+          rm private.pem
+          echo "CRX created."
+
+      # 6. Upload Assets to the existing Release
+      - name: Upload Assets to Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { repo, owner } = context.repo;
+            // On récupère l'ID de la release qui vient de déclencher l'action
+            const releaseId = context.payload.release.id;
+            
+            console.log(`Uploading assets to release ID: ${releaseId}`);
+            
+            const files = ['chrome-extension.zip', 'firefox-extension.zip', 'extension.crx'];
+            
+            for (const file of files) {
+              if (fs.existsSync(file)) {
+                console.log(`Uploading ${file}...`);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner,
+                  repo,
+                  release_id: releaseId,
+                  name: file,
+                  data: fs.readFileSync(file)
+                });
+              } else {
+                console.log(`File ${file} skipped (not found).`);
+              }
+            }

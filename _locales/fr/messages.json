@@ -1,0 +1,38 @@
+{
+  "extName": {
+    "message": "Générateur Code HA"
+  },
+  "extDescription": {
+    "message": "Génère un code de boîte aux lettres via Home Assistant et l'insère dans le champ actif."
+  },
+  "menuTitle": {
+    "message": "Générer un code via Home Assistant"
+  },
+  "promptMessage": {
+    "message": "Description du colis (ex: Amazon, Vêtements) :"
+  },
+  "promptDefault": {
+    "message": "Achat Internet"
+  },
+  "errorConfig": {
+    "message": "Extension non configurée. Veuillez faire un clic-droit sur l'icône de l'extension > Options."
+  },
+  "errorNetwork": {
+    "message": "Erreur de communication avec Home Assistant."
+  },
+  "optionsTitle": {
+    "message": "Configuration Home Assistant"
+  },
+  "labelUrl": {
+    "message": "URL de Home Assistant (ex: http://homeassistant.local:8123)"
+  },
+  "labelToken": {
+    "message": "Jeton d'accès longue durée (Long-Lived Access Token)"
+  },
+  "btnSave": {
+    "message": "Sauvegarder"
+  },
+  "msgSaved": {
+    "message": "Configuration sauvegardée !"
+  }
+}

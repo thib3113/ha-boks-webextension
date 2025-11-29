@@ -1,0 +1,38 @@
+{
+  "extName": {
+    "message": "HA Boks - Code Generator"
+  },
+  "extDescription": {
+    "message": "Generates a mailbox code via Home Assistant and inserts it into the active field."
+  },
+  "menuTitle": {
+    "message": "Generate Code via Home Assistant"
+  },
+  "promptMessage": {
+    "message": "Package description (e.g. Amazon, Clothes):"
+  },
+  "promptDefault": {
+    "message": "Online Purchase"
+  },
+  "errorConfig": {
+    "message": "Extension not configured. Please right-click extension icon > Options."
+  },
+  "errorNetwork": {
+    "message": "Communication error with Home Assistant."
+  },
+  "optionsTitle": {
+    "message": "Home Assistant Configuration"
+  },
+  "labelUrl": {
+    "message": "Home Assistant URL (e.g. http://homeassistant.local:8123)"
+  },
+  "labelToken": {
+    "message": "Long-Lived Access Token"
+  },
+  "btnSave": {
+    "message": "Save"
+  },
+  "msgSaved": {
+    "message": "Configuration saved!"
+  }
+}
