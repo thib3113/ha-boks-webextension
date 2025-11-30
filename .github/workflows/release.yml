@@ -184,10 +184,13 @@ jobs:
             "${CHROME_CRX}"
           )
 
-          # build expected certificate-identity regexp from repo url (matches the identity claim in cert)
-          # e.g. https://github.com/thib3113/ha-boks-webextension.*
+          # certificate identity regexp (matches repo URL in cert 'subject' or 'extensions')
           CERT_IDENTITY_REGEXP="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.*"
+          # certificate oidc issuer regexp: GitHub Actions OIDC provider
+          CERT_OIDC_ISSUER_REGEXP="${CERT_OIDC_ISSUER_REGEXP:-https://token.actions.githubusercontent.com.*}"
+
           echo "Using certificate identity regexp: $CERT_IDENTITY_REGEXP"
+          echo "Using certificate oidc issuer regexp: $CERT_OIDC_ISSUER_REGEXP"
 
           for f in "${artifacts[@]}"; do
             if [ ! -f "$f" ]; then
@@ -203,8 +206,8 @@ jobs:
             "$COSIGN_BIN" sign-blob -y --oidc-provider github-actions --output-signature "$sig" --output-certificate "$cert" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            # verify with certificate file and require expected certificate identity (regex)
-            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" "$f" 2>&1 | tee "$prov"
+            # verify with certificate file and require expected certificate identity and issuer regexps
+            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" --certificate-oidc-issuer-regexp "$CERT_OIDC_ISSUER_REGEXP" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
           done
@@ -283,16 +286,20 @@ jobs:
             const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
             const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
 
+            // Build the recommended certificate identity & issuer regexps to use with cosign verify-blob
+            const certRegexp = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.*`;
+            const issuerRegexp = 'https://token.actions.githubusercontent.com.*';
+
             const verificationBlock = [
               '',
               '## Signature verification (Provenance)',
               '',
-              'The artifacts published with this release are signed using Sigstore / cosign (keyless mode).',
+              'The artifacts published with this release are signed using Sigstore / cosign (keyless mode when available).',
               'To verify locally that the files were produced by this build, install cosign and run, for example:',
               '',
-              `- CRX (Chrome): \`cosign verify-blob --keyless --signature chrome-ha-boks-extension.crx.sig ${base}/chrome-ha-boks-extension.crx\``,
-              `- Chrome ZIP: \`cosign verify-blob --keyless --signature ha-boks-extension.zip.sig ${base}/ha-boks-extension.zip\``,
-              `- Firefox XPI: \`cosign verify-blob --keyless --signature firefox-ha-boks-extension.xpi.sig ${base}/firefox-ha-boks-extension.xpi\``,
+              `- CRX (Chrome): \`cosign verify-blob --signature chrome-ha-boks-extension.crx.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/chrome-ha-boks-extension.crx\``,
+              `- Chrome ZIP: \`cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip\``,
+              `- Firefox XPI: \`cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi\``,
               '',
               'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
               '',
@@ -309,5 +316,3 @@ jobs:
               release_id: releaseId,
               body: newBody
             });
-
-            console.log('Release notes updated with verification instructions.');
