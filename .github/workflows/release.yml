@@ -45,26 +45,33 @@ jobs:
           rm -rf firefox_dist
           echo "Firefox ZIP created."
 
-      # 5. Build CRX (Signed for manual installation)
       - name: Install CRX tool and Pack
         id: pack_crx
-        if: ${{ secrets.CRX_PRIVATE_KEY != '' }}
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_KEY }}
         run: |
+          if [ -z "${CRX_PRIVATE_KEY:-}" ]; then
+            echo "No CRX private key supplied — skipping CRX pack step."
+            exit 0
+          fi
+
           npm install -g crx3
-          echo "${{ secrets.CRX_PRIVATE_KEY }}" > private.pem
-          # On ignore les zips que l'on vient de créer pour ne pas les inclure dans le CRX
-          crx3 pack . -p private.pem -o extension.crx -x ".git" -x ".github" -x "chrome-extension.zip" -x "firefox-extension.zip" -x "private.pem"
-          rm private.pem
+
+          printf '%s\n' "$CRX_PRIVATE_KEY" > private.pem
+          chmod 600 private.pem
+
+          crx3 pack . -p private.pem -o extension.crx \
+            -x ".git" -x ".github" -x "chrome-extension.zip" -x "firefox-extension.zip" -x "private.pem"
+
+          shred -u private.pem || rm -f private.pem
           echo "CRX created."
 
-      # 6. Upload Assets to the existing Release
       - name: Upload Assets to Release
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const { repo, owner } = context.repo;
-            // On récupère l'ID de la release qui vient de déclencher l'action
             const releaseId = context.payload.release.id;
             
             console.log(`Uploading assets to release ID: ${releaseId}`);
