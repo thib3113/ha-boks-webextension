@@ -10,6 +10,16 @@ function localizeHtmlPage() {
             obj.textContent = msg;
         }
     }
+    
+    const placeholders = document.querySelectorAll('[data-i18n-placeholder]');
+    for (let i = 0; i < placeholders.length; i++) {
+        const obj = placeholders[i];
+        const msgKey = obj.getAttribute('data-i18n-placeholder');
+        const msg = chrome.i18n.getMessage(msgKey);
+        if (msg) {
+            obj.setAttribute('placeholder', msg);
+        }
+    }
 }
 
 // 2. Save Logic

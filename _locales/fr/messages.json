@@ -34,5 +34,19 @@
   },
   "msgSaved": {
     "message": "Configuration sauvegardée !"
+  },
+  "extensionPrefix": {
+    "message": "[HA Extension] "
+  },
+  "errorHttp": {
+    "message": "Erreur HTTP : $STATUS$",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsPageTitle": {
+    "message": "Options de l'extension HA Boks"
   }
 }

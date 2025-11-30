@@ -34,5 +34,19 @@
   },
   "msgSaved": {
     "message": "Configuration saved!"
+  },
+  "extensionPrefix": {
+    "message": "[HA Extension] "
+  },
+  "errorHttp": {
+    "message": "HTTP Error: $STATUS$",
+    "placeholders": {
+      "status": {
+        "content": "$1"
+      }
+    }
+  },
+  "optionsPageTitle": {
+    "message": "HA Extension Options"
   }
 }

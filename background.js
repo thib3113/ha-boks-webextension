@@ -49,7 +49,7 @@ async function handleMenuClick(tab) {
         }
 
         // 3. Call Home Assistant
-        const code = await fetchCodeFromHA(config.haUrl, config.haToken, description);
+        const code = await addParcelAndGetCode(config.haUrl, config.haToken, description);
 
         // 4. Insert code into the field
         if (code) {
@@ -72,52 +72,61 @@ async function handleMenuClick(tab) {
 /**
  * API Call to Home Assistant
  */
-async function fetchCodeFromHA(baseUrl, token, description) {
-    // Ensure no trailing slash on URL
+async function addParcelAndGetCode(baseUrl, token, description) {
+    // Nettoyage de l'URL (retrait du slash final s'il existe)
     const cleanBaseUrl = baseUrl.replace(/\/$/, "");
-    // Target script entity_id: script.generate_mailbox_code
-    const apiUrl = `${cleanBaseUrl}/api/services/script/generate_mailbox_code`;
 
-    const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            variables: { description: description }
-        })
-    });
+    // ATTENTION : On appelle le service de l'intégration (boks), pas un script.
+    const apiUrl = `${cleanBaseUrl}/api/services/boks/add_parcel`;
 
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    try {
+        const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+            // Pour un Service d'intégration, les champs sont à la racine
+            body: JSON.stringify({
+                description: description
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(chrome.i18n.getMessage("errorHttp", [response.status.toString()]));
+        }
+
+        // Home Assistant renvoie un tableau JSON.
+        // Si supports_response est activé, il contient votre dictionnaire.
+        const data = await response.json();
+
+        // Log pour voir la structure exacte dans la console du navigateur
+        console.log("Réponse brute HA:", data);
+
+        // Récupération du code
+        // La structure reçue est : { "code": "123456", "context": {...} }
+        if (data && data.code) {
+            return data.code;
+        } else {
+            console.warn("Pas de code dans la réponse");
+            return null;
+        }
+
+    } catch (error) {
+        console.error("Erreur lors de l'appel API:", error);
+        return null;
     }
-
-    const data = await response.json();
-
-    // Logic to extract the code from HA response.
-    // HA 2023.7+ scripts can return data in `response` key if configured with `response_variable`
-    // Structure: { "response": { "code": "123456" }, ... }
-
-    if (data.response && data.response.code) {
-        return data.response.code;
-    }
-
-    // Fallback: If your script only creates a notification/input_text but doesn't return data directly,
-    // we cannot get the code immediately.
-    // For this example, we assume the HA script IS configured to return a response.
-    // If not, we throw an error or return a generic message.
-    return data.response ? JSON.stringify(data.response) : "OK (No Return)";
 }
 
 /**
  * Injected function: Displays an alert in the browser tab
  */
 function alertUser(tabId, message) {
+    const prefix = chrome.i18n.getMessage("extensionPrefix");
     chrome.scripting.executeScript({
         target: { tabId: tabId },
-        func: (msg) => alert("[HA Extension] " + msg),
-        args: [message]
+        func: (p, msg) => alert(p + msg),
+        args: [prefix, message]
     });
 }
 
