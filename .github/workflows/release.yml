@@ -212,12 +212,12 @@ jobs:
             cert="${f}.cert"
             prov="provenance/${f}.verify.txt"
 
-            echo "Signing $f -> $sig (cosign will use keyless/OIDC if available in the environment)"
-            # Use sign-blob without --key to trigger keyless flow; write signature and certificate files
-            "$COSIGN_BIN" sign-blob --output-signature "$sig" --output-certificate "$cert" "$f"
+            echo "Signing $f -> $sig (non-interactive; cosign will use Actions OIDC if available)"
+            # Use sign-blob without --key and suppress interactive confirmation with -y
+            # Also force github-actions provider to prefer the Actions OIDC flow in non-interactive runners
+            "$COSIGN_BIN" sign-blob -y --oidc-provider github-actions --output-signature "$sig" --output-certificate "$cert" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            # verify-blob will validate the signature/certificate and print claims; save output
             "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
