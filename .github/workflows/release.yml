@@ -136,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Pin a recent cosign release known to support keyless sign-blob/verify-blob
+          # Pin a recent cosign release known to support keyless behaviour for sign-blob
           COSIGN_VERSION="v2.4.1"
           COSIGN_BIN="/usr/local/bin/cosign"
 
@@ -146,7 +146,6 @@ jobs:
             echo "Downloaded cosign to $COSIGN_BIN"
           else
             echo "Failed to download cosign binary from GitHub releases. Will try docker image fallback..."
-            # fallback: extract binary from official GHCR image (requires docker available)
             if command -v docker >/dev/null 2>&1; then
               docker run --rm --entrypoint cat "ghcr.io/sigstore/cosign/cosign:${COSIGN_VERSION}" /ko-app/cosign > "$COSIGN_BIN"
               chmod +x "$COSIGN_BIN"
@@ -158,37 +157,25 @@ jobs:
           fi
 
           echo "Checking cosign binary at $COSIGN_BIN"
-          # Basic file check
-          if ! file "$COSIGN_BIN" | grep -q -E 'ELF|Mach-O|executable'; then
-            echo "ERROR: downloaded cosign does not look like a valid executable:"
-            file "$COSIGN_BIN"
-            ls -l "$COSIGN_BIN" || true
-            exit 3
-          fi
-
           # Try both 'version' and '--version' to be tolerant with variants
-          echo "Trying '$COSIGN_BIN version'..."
           if "$COSIGN_BIN" version >/dev/null 2>&1; then
             "$COSIGN_BIN" version || true
+          elif "$COSIGN_BIN" --version >/dev/null 2>&1; then
+            "$COSIGN_BIN" --version || true
           else
-            echo "Trying '$COSIGN_BIN --version'..."
-            if "$COSIGN_BIN" --version >/dev/null 2>&1; then
-              "$COSIGN_BIN" --version || true
-            else
-              echo "Warning: cosign did not accept 'version' or '--version' flags. Continuing, will check sign-blob help next."
-            fi
+            echo "Warning: cosign did not accept 'version' or '--version' flags. Continuing, will check sign-blob help next."
           fi
 
-          # Ensure sign-blob advertises --keyless
-          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--keyless'; then
-            echo "ERROR: the installed cosign ($COSIGN_BIN) does not advertise --keyless for sign-blob."
+          # Ensure sign-blob supports non-key signing (we avoid using --keyless flag)
+          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--output-signature'; then
+            echo "ERROR: the installed cosign ($COSIGN_BIN) does not appear to support sign-blob with --output-signature."
             echo "Output of $COSIGN_BIN sign-blob --help:"
             "$COSIGN_BIN" sign-blob --help 2>&1 || true
-            echo "Please pick a newer cosign release (e.g. v2.4.1) or update the installation URL. Failing job to let you fix it."
+            echo "Please pick a newer cosign release. Failing job to let you fix it."
             exit 4
           fi
 
-          echo "Cosign installed and supports --keyless. Exporting COSIGN_BIN"
+          echo "Cosign installed and basic sign-blob support present. Exporting COSIGN_BIN"
           echo "COSIGN_BIN=$COSIGN_BIN" >> "$GITHUB_ENV"
         shell: bash
 
@@ -203,15 +190,6 @@ jobs:
           set -euo pipefail
           COSIGN_BIN="${COSIGN_BIN:-/usr/local/bin/cosign}"
           mkdir -p provenance
-
-          # check if the installed cosign supports keyless for sign-blob
-          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--keyless'; then
-            echo "Error: the installed cosign ($COSIGN_BIN) does not advertise --keyless for sign-blob."
-            echo "Output of $COSIGN_BIN --version:"
-            "$COSIGN_BIN" --version || true
-            echo "Please ensure cosign >= v1.7.0 (or a recent release) is installed. Failing the job so you can fix the runner."
-            exit 2
-          fi
 
           BASE="ha-boks-extension"
           CHROME_CRX="chrome-${BASE}.crx"
@@ -234,12 +212,13 @@ jobs:
             cert="${f}.cert"
             prov="provenance/${f}.verify.txt"
 
-            echo "Signing $f -> $sig"
-            # call the explicit binary to avoid picking a system cosign
-            "$COSIGN_BIN" sign-blob --keyless --output-signature "$sig" "$f"
+            echo "Signing $f -> $sig (cosign will use keyless/OIDC if available in the environment)"
+            # Use sign-blob without --key to trigger keyless flow; write signature and certificate files
+            "$COSIGN_BIN" sign-blob --output-signature "$sig" --output-certificate "$cert" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            "$COSIGN_BIN" verify-blob --keyless --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
+            # verify-blob will validate the signature/certificate and print claims; save output
+            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
           done
@@ -249,11 +228,11 @@ jobs:
         run: |
           echo "Artifacts in workspace:"
           ls -alh
-          echo "--- chrome ZIP content (if present) ---"
+          echo "--- ha-boks-extension.zip content (if present) ---"
           test -f ha-boks-extension.zip && unzip -l ha-boks-extension.zip || true
-          echo "--- firefox XPI content (if present) ---"
+          echo "--- firefox-ha-boks-extension.xpi content (if present) ---"
           test -f firefox-ha-boks-extension.xpi && unzip -l firefox-ha-boks-extension.xpi || true
-          echo "--- CRX present? ---"
+          echo "--- chrome-ha-boks-extension.crx present? ---"
           test -f chrome-ha-boks-extension.crx && echo "Found chrome-ha-boks-extension.crx" || true
           echo "--- provenance files ---"
           ls -alh provenance || true
