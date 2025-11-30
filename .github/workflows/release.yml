@@ -70,7 +70,6 @@ jobs:
           CRX_PRIVATE_KEY: ${{ secrets.CRX_KEY }}
         run: |
           set -euo pipefail
-
           BASE="ha-boks-extension"
           CHROME_CRX="chrome-${BASE}.crx"
           ZIP_NAME="${BASE}.zip"
@@ -80,7 +79,6 @@ jobs:
             exit 0
           fi
 
-          # Prepare keyfile: support PEM in cleartext or base64-encoded secret
           KEYFILE=private.pem
           if printf '%s' "$CRX_PRIVATE_KEY" | grep -q "BEGIN"; then
             printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEYFILE"
@@ -89,46 +87,30 @@ jobs:
           fi
           chmod 600 "$KEYFILE"
 
-          # Compute CRX URL automatically from the release tag and repository
           if [ -z "${RELEASE_TAG:-}" ]; then
-            echo "Release tag is empty — cannot compute CRX URL"
             CRX_URL=""
           else
             CRX_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${CHROME_CRX}"
           fi
           echo "Computed CRX URL: ${CRX_URL}"
 
-          # Determine APP_VERSION: prefer release tag (strip leading v/V), fallback to manifest.json
           APP_VERSION=""
           if [ -n "${RELEASE_TAG:-}" ]; then
             APP_VERSION="${RELEASE_TAG#v}"
             APP_VERSION="${APP_VERSION#V}"
-            echo "Using release tag as version (stripped): $APP_VERSION"
           fi
-
-          if [ -z "${APP_VERSION}" ]; then
-            if [ -f chrome_build/manifest.json ]; then
-              APP_VERSION=$(jq -r '.version // empty' chrome_build/manifest.json || true)
-              echo "Using version from manifest.json: ${APP_VERSION}"
-            fi
+          if [ -z "${APP_VERSION}" ] && [ -f chrome_build/manifest.json ]; then
+            APP_VERSION=$(jq -r '.version // empty' chrome_build/manifest.json || true)
           fi
+          if [ -z "${APP_VERSION}" ]; then APP_VERSION="0.0.0"; fi
 
-          if [ -z "${APP_VERSION}" ]; then
-            APP_VERSION="0.0.0"
-            echo "No version found in release tag or manifest.json, using fallback: ${APP_VERSION}"
-          fi
-
-          echo "Packing CRX from chrome_build/ with appVersion=${APP_VERSION} ..."
-          # Use npx to ensure crx3 is available without global install
           if [ -n "${CRX_URL}" ]; then
             npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" --crxURL "$CRX_URL" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
           else
             npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
           fi
 
-          # Securely remove key
           shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
-
           echo "CRX and Chrome ZIP created: ${CHROME_CRX}, ${ZIP_NAME}"
         shell: bash
 
@@ -202,6 +184,11 @@ jobs:
             "${CHROME_CRX}"
           )
 
+          # build expected certificate-identity regexp from repo url (matches the identity claim in cert)
+          # e.g. https://github.com/thib3113/ha-boks-webextension.*
+          CERT_IDENTITY_REGEXP="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.*"
+          echo "Using certificate identity regexp: $CERT_IDENTITY_REGEXP"
+
           for f in "${artifacts[@]}"; do
             if [ ! -f "$f" ]; then
               echo "Warning: $f not found, skipping signing."
@@ -213,12 +200,11 @@ jobs:
             prov="provenance/${f}.verify.txt"
 
             echo "Signing $f -> $sig (non-interactive; cosign will use Actions OIDC if available)"
-            # Use sign-blob without --key and suppress interactive confirmation with -y
-            # Also force github-actions provider to prefer the Actions OIDC flow in non-interactive runners
             "$COSIGN_BIN" sign-blob -y --oidc-provider github-actions --output-signature "$sig" --output-certificate "$cert" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
+            # verify with certificate file and require expected certificate identity (regex)
+            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
           done
