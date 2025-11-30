@@ -132,11 +132,23 @@ jobs:
           echo "CRX and Chrome ZIP created: ${CHROME_CRX}, ${ZIP_NAME}"
         shell: bash
 
-      - name: Install cosign
+      - name: Install cosign (explicit path) and verify binary
         run: |
           set -euo pipefail
-          curl -sSL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
-          chmod +x /usr/local/bin/cosign
+          COSIGN_BIN="/usr/local/bin/cosign"
+          curl -sSL "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64" -o "$COSIGN_BIN"
+          chmod +x "$COSIGN_BIN"
+
+          echo "System which cosign: $(which cosign || true)"
+          echo "Installed cosign at $COSIGN_BIN"
+          echo "cosign version (system):"
+          if command -v cosign >/dev/null 2>&1; then cosign --version || true; else echo "no system cosign"; fi
+          echo "cosign version (installed):"
+          "$COSIGN_BIN" --version || true
+
+          # ensure we will call the installed binary explicitly
+          echo "Exporting COSIGN_BIN for next steps"
+          echo "COSIGN_BIN=$COSIGN_BIN" >> $GITHUB_ENV
         shell: bash
 
       - name: Sign all artifacts with cosign (keyless) and record provenance
@@ -148,7 +160,17 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          COSIGN_BIN="${COSIGN_BIN:-/usr/local/bin/cosign}"
           mkdir -p provenance
+
+          # check if the installed cosign supports keyless for sign-blob
+          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--keyless'; then
+            echo "Error: the installed cosign ($COSIGN_BIN) does not advertise --keyless for sign-blob."
+            echo "Output of $COSIGN_BIN --version:"
+            "$COSIGN_BIN" --version || true
+            echo "Please ensure cosign >= v1.7.0 (or a recent release) is installed. Failing the job so you can fix the runner."
+            exit 2
+          fi
 
           BASE="ha-boks-extension"
           CHROME_CRX="chrome-${BASE}.crx"
@@ -172,11 +194,11 @@ jobs:
             prov="provenance/${f}.verify.txt"
 
             echo "Signing $f -> $sig"
-            cosign sign-blob --keyless --output-signature "$sig" "$f"
+            # call the explicit binary to avoid picking a system cosign
+            "$COSIGN_BIN" sign-blob --keyless --output-signature "$sig" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            # write verification output to provenance file and also print to logs
-            cosign verify-blob --keyless --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
+            "$COSIGN_BIN" verify-blob --keyless --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
           done
