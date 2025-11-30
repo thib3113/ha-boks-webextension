@@ -1,83 +1,227 @@
-name: Build and Publish Extension
+name: Build, Sign and Publish Extension
 
+# Trigger on published releases
 on:
   release:
     types: [published]
 
+# Grant id-token so cosign keyless can use OIDC
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   build-and-attach:
-    name: Build and Attach Assets
+    name: Build, Sign and Attach Assets
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Requis pour uploader les assets dans la release
+      contents: write
+      id-token: write
 
     steps:
-      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 2. Setup Node.js (for crx3)
-      - name: Setup Node.js
+      - name: Setup Node.js & tools
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
 
-      # 3. Build Chrome ZIP
-      # On garde le manifest.json original (MV3 Chrome standard)
-      - name: Create Chrome ZIP
+      - name: Prepare build directories (copy only src)
         run: |
-          zip -r chrome-extension.zip . -x "*.git*" -x ".github/*" -x "*.pem" -x "*.DS_Store"
-          echo "Chrome ZIP created."
+          set -euo pipefail
+          rm -rf build firefox_dist chrome_build provenance
+          mkdir -p build chrome_build firefox_dist provenance
 
-      # 4. Build Firefox ZIP (Specialized)
-      - name: Create Firefox ZIP
+          # Copy extension source to a clean build dir (avoid .github, .git, node_modules, etc.)
+          rsync -a --delete --exclude='.git' --exclude='.github' --exclude='node_modules' src/ chrome_build/
+          rsync -a --delete --exclude='.git' --exclude='.github' --exclude='node_modules' src/ firefox_dist/
+
+          echo "Prepared chrome_build/ and firefox_dist/ from src/"
+        shell: bash
+
+      - name: Create Firefox XPI
         run: |
-          mkdir firefox_dist
-          # Copie propre des fichiers
-          rsync -av --exclude='chrome-extension.zip' --exclude='.git' --exclude='.github' . firefox_dist/
-
+          set -euo pipefail
           cd firefox_dist
 
-          jq '.browser_specific_settings = { "gecko": { "id": "55082b69-ecc1-46ce-8dcd-90c30df203b1" } }' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
-          
-          zip -r ../firefox-extension.xpi .
-          cd ..
-          rm -rf firefox_dist
-          echo "Firefox ZIP created."
+          if [ -f manifest.json ]; then
+            # Add browser_specific_settings.gecko.id if not present
+            if ! jq -e '.browser_specific_settings.gecko.id' manifest.json >/dev/null 2>&1; then
+              jq '.browser_specific_settings = { "gecko": { "id": "55082b69-ecc1-46ce-8dcd-90c30df203b1" } }' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+            fi
+          fi
 
-      - name: Install CRX tool and Pack
+          # Create an XPI (ZIP with .xpi extension)
+          FIREFOX_NAME="firefox-ha-boks-extension.xpi"
+          zip -r "../${FIREFOX_NAME}" .
+          cd ..
+          echo "Created ${FIREFOX_NAME}"
+        shell: bash
+
+      - name: Install crx3 & Pack Chrome ZIP + CRX
         id: pack_crx
         env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           CRX_PRIVATE_KEY: ${{ secrets.CRX_KEY }}
         run: |
+          set -euo pipefail
+
+          BASE="ha-boks-extension"
+          CHROME_CRX="chrome-${BASE}.crx"
+          ZIP_NAME="${BASE}.zip"
+
           if [ -z "${CRX_PRIVATE_KEY:-}" ]; then
             echo "No CRX private key supplied — skipping CRX pack step."
             exit 0
           fi
 
-          npm install -g crx3
+          # Prepare keyfile: support PEM in cleartext or base64-encoded secret
+          KEYFILE=private.pem
+          if printf '%s' "$CRX_PRIVATE_KEY" | grep -q "BEGIN"; then
+            printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEYFILE"
+          else
+            echo "$CRX_PRIVATE_KEY" | base64 --decode > "$KEYFILE" || { echo "Failed to decode CRX_KEY as base64"; exit 4; }
+          fi
+          chmod 600 "$KEYFILE"
 
-          printf '%s\n' "$CRX_PRIVATE_KEY" > private.pem
-          chmod 600 private.pem
+          # Compute CRX URL automatically from the release tag and repository
+          if [ -z "${RELEASE_TAG:-}" ]; then
+            echo "Release tag is empty — cannot compute CRX URL"
+            CRX_URL=""
+          else
+            CRX_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${CHROME_CRX}"
+          fi
+          echo "Computed CRX URL: ${CRX_URL}"
 
-          crx3 pack . -p private.pem -o extension.crx \
-            -x ".git" -x ".github" -x "chrome-extension.zip" -x "firefox-extension.zip" -x "private.pem"
+          # Determine APP_VERSION: prefer release tag (strip leading v/V), fallback to manifest.json
+          APP_VERSION=""
+          if [ -n "${RELEASE_TAG:-}" ]; then
+            APP_VERSION="${RELEASE_TAG#v}"
+            APP_VERSION="${APP_VERSION#V}"
+            echo "Using release tag as version (stripped): $APP_VERSION"
+          fi
 
-          shred -u private.pem || rm -f private.pem
-          echo "CRX created."
+          if [ -z "${APP_VERSION}" ]; then
+            if [ -f chrome_build/manifest.json ]; then
+              APP_VERSION=$(jq -r '.version // empty' chrome_build/manifest.json || true)
+              echo "Using version from manifest.json: ${APP_VERSION}"
+            fi
+          fi
 
-      - name: Upload Assets to Release
+          if [ -z "${APP_VERSION}" ]; then
+            APP_VERSION="0.0.0"
+            echo "No version found in release tag or manifest.json, using fallback: ${APP_VERSION}"
+          fi
+
+          echo "Packing CRX from chrome_build/ with appVersion=${APP_VERSION} ..."
+          # Use npx to ensure crx3 is available without global install
+          if [ -n "${CRX_URL}" ]; then
+            npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" --crxURL "$CRX_URL" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
+          else
+            npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
+          fi
+
+          # Securely remove key
+          shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
+
+          echo "CRX and Chrome ZIP created: ${CHROME_CRX}, ${ZIP_NAME}"
+        shell: bash
+
+      - name: Install cosign
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+        shell: bash
+
+      - name: Sign all artifacts with cosign (keyless) and record provenance
+        if: success() && steps.pack_crx.outcome == 'success'
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p provenance
+
+          BASE="ha-boks-extension"
+          CHROME_CRX="chrome-${BASE}.crx"
+          ZIP_NAME="${BASE}.zip"
+          FIREFOX_NAME="firefox-${BASE}.xpi"
+
+          artifacts=(
+            "${ZIP_NAME}"
+            "${FIREFOX_NAME}"
+            "${CHROME_CRX}"
+          )
+
+          for f in "${artifacts[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "Warning: $f not found, skipping signing."
+              continue
+            fi
+
+            sig="${f}.sig"
+            cert="${f}.cert"
+            prov="provenance/${f}.verify.txt"
+
+            echo "Signing $f -> $sig"
+            cosign sign-blob --keyless --output-signature "$sig" "$f"
+
+            echo "Verifying $f and saving output to $prov"
+            # write verification output to provenance file and also print to logs
+            cosign verify-blob --keyless --signature "$sig" --cert "$cert" "$f" 2>&1 | tee "$prov"
+
+            echo "Signed $f -> $sig and $cert; verification written to $prov"
+          done
+        shell: bash
+
+      - name: List artifacts for debug
+        run: |
+          echo "Artifacts in workspace:"
+          ls -alh
+          echo "--- chrome ZIP content (if present) ---"
+          test -f ha-boks-extension.zip && unzip -l ha-boks-extension.zip || true
+          echo "--- firefox XPI content (if present) ---"
+          test -f firefox-ha-boks-extension.xpi && unzip -l firefox-ha-boks-extension.xpi || true
+          echo "--- CRX present? ---"
+          test -f chrome-ha-boks-extension.crx && echo "Found chrome-ha-boks-extension.crx" || true
+          echo "--- provenance files ---"
+          ls -alh provenance || true
+        shell: bash
+
+      - name: Upload Assets to Release (including signatures & provenance)
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const { repo, owner } = context.repo;
             const releaseId = context.payload.release.id;
-            
             console.log(`Uploading assets to release ID: ${releaseId}`);
-            
-            const files = ['chrome-extension.zip', 'firefox-extension.zip', 'extension.crx'];
-            
+
+            const files = [
+              'ha-boks-extension.zip',
+              'ha-boks-extension.zip.sig',
+              'ha-boks-extension.zip.cert',
+              'provenance/ha-boks-extension.zip.verify.txt',
+
+              'firefox-ha-boks-extension.xpi',
+              'firefox-ha-boks-extension.xpi.sig',
+              'firefox-ha-boks-extension.xpi.cert',
+              'provenance/firefox-ha-boks-extension.xpi.verify.txt',
+
+              'chrome-ha-boks-extension.crx',
+              'chrome-ha-boks-extension.crx.sig',
+              'chrome-ha-boks-extension.crx.cert',
+              'provenance/chrome-ha-boks-extension.crx.verify.txt'
+            ];
+
             for (const file of files) {
               if (fs.existsSync(file)) {
                 console.log(`Uploading ${file}...`);
@@ -88,7 +232,54 @@ jobs:
                   name: file,
                   data: fs.readFileSync(file)
                 });
+                console.log(`Uploaded ${file}`);
               } else {
                 console.log(`File ${file} skipped (not found).`);
               }
             }
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Append verification instructions to release notes
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const releaseId = context.payload.release.id;
+            const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
+            const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
+
+            const verificationBlock = [
+              '',
+              '## Signature verification (Provenance)',
+              '',
+              'The artifacts published with this release are signed using Sigstore / cosign (keyless mode).',
+              'To verify locally that the files were produced by this build, install cosign and run, for example:',
+              '',
+              `- CRX (Chrome): \`cosign verify-blob --keyless --signature chrome-ha-boks-extension.crx.sig ${base}/chrome-ha-boks-extension.crx\``,
+              `- Chrome ZIP: \`cosign verify-blob --keyless --signature ha-boks-extension.zip.sig ${base}/ha-boks-extension.zip\``,
+              `- Firefox XPI: \`cosign verify-blob --keyless --signature firefox-ha-boks-extension.xpi.sig ${base}/firefox-ha-boks-extension.xpi\``,
+              '',
+              'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
+              '',
+              'Quick docs: https://github.com/sigstore/cosign',
+              ''
+            ].join('\n');
+
+            const current = context.payload.release.body || '';
+            const newBody = current + '\n\n' + verificationBlock;
+
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: releaseId,
+              body: newBody
+            });
+
+            console.log('Release notes updated with verification instructions.');
