@@ -132,23 +132,64 @@ jobs:
           echo "CRX and Chrome ZIP created: ${CHROME_CRX}, ${ZIP_NAME}"
         shell: bash
 
-      - name: Install cosign (explicit path) and verify binary
+      - name: Install cosign
         run: |
           set -euo pipefail
+
+          # Pin a recent cosign release known to support keyless sign-blob/verify-blob
+          COSIGN_VERSION="v2.4.1"
           COSIGN_BIN="/usr/local/bin/cosign"
-          curl -sSL "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64" -o "$COSIGN_BIN"
-          chmod +x "$COSIGN_BIN"
 
-          echo "System which cosign: $(which cosign || true)"
-          echo "Installed cosign at $COSIGN_BIN"
-          echo "cosign version (system):"
-          if command -v cosign >/dev/null 2>&1; then cosign --version || true; else echo "no system cosign"; fi
-          echo "cosign version (installed):"
-          "$COSIGN_BIN" --version || true
+          echo "Attempting to download cosign ${COSIGN_VERSION} to ${COSIGN_BIN}..."
+          if curl -fSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" -o "$COSIGN_BIN"; then
+            chmod +x "$COSIGN_BIN"
+            echo "Downloaded cosign to $COSIGN_BIN"
+          else
+            echo "Failed to download cosign binary from GitHub releases. Will try docker image fallback..."
+            # fallback: extract binary from official GHCR image (requires docker available)
+            if command -v docker >/dev/null 2>&1; then
+              docker run --rm --entrypoint cat "ghcr.io/sigstore/cosign/cosign:${COSIGN_VERSION}" /ko-app/cosign > "$COSIGN_BIN"
+              chmod +x "$COSIGN_BIN"
+              echo "Extracted cosign from GHCR image to $COSIGN_BIN"
+            else
+              echo "ERROR: could not download cosign and docker not available for fallback. Exiting."
+              exit 2
+            fi
+          fi
 
-          # ensure we will call the installed binary explicitly
-          echo "Exporting COSIGN_BIN for next steps"
-          echo "COSIGN_BIN=$COSIGN_BIN" >> $GITHUB_ENV
+          echo "Checking cosign binary at $COSIGN_BIN"
+          # Basic file check
+          if ! file "$COSIGN_BIN" | grep -q -E 'ELF|Mach-O|executable'; then
+            echo "ERROR: downloaded cosign does not look like a valid executable:"
+            file "$COSIGN_BIN"
+            ls -l "$COSIGN_BIN" || true
+            exit 3
+          fi
+
+          # Try both 'version' and '--version' to be tolerant with variants
+          echo "Trying '$COSIGN_BIN version'..."
+          if "$COSIGN_BIN" version >/dev/null 2>&1; then
+            "$COSIGN_BIN" version || true
+          else
+            echo "Trying '$COSIGN_BIN --version'..."
+            if "$COSIGN_BIN" --version >/dev/null 2>&1; then
+              "$COSIGN_BIN" --version || true
+            else
+              echo "Warning: cosign did not accept 'version' or '--version' flags. Continuing, will check sign-blob help next."
+            fi
+          fi
+
+          # Ensure sign-blob advertises --keyless
+          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--keyless'; then
+            echo "ERROR: the installed cosign ($COSIGN_BIN) does not advertise --keyless for sign-blob."
+            echo "Output of $COSIGN_BIN sign-blob --help:"
+            "$COSIGN_BIN" sign-blob --help 2>&1 || true
+            echo "Please pick a newer cosign release (e.g. v2.4.1) or update the installation URL. Failing job to let you fix it."
+            exit 4
+          fi
+
+          echo "Cosign installed and supports --keyless. Exporting COSIGN_BIN"
+          echo "COSIGN_BIN=$COSIGN_BIN" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Sign all artifacts with cosign (keyless) and record provenance
