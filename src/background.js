@@ -26,7 +26,7 @@ async function handleMenuClick(tab) {
         // 1. Prompt user for description
         // We inject a script to run window.prompt inside the tab
         const promptMsg = chrome.i18n.getMessage("promptMessage");
-        const promptDefault = chrome.i18n.getMessage("promptDefault");
+        let promptDefault = chrome.i18n.getMessage("promptDefault");
 
         const inputResult = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
@@ -69,52 +69,329 @@ async function handleMenuClick(tab) {
     }
 }
 
-/**
- * API Call to Home Assistant
- */
-async function addParcelAndGetCode(baseUrl, token, description) {
-    // Nettoyage de l'URL (retrait du slash final s'il existe)
-    const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+// Listener for messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "ADD_PARCEL") {
+        handleAddParcel(request.description)
+            .then(result => sendResponse({ success: result !== null, code: result }))
+            .catch(error => {
+                console.error("Error in handleAddParcel:", error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
 
-    // ATTENTION : On appelle le service de l'intégration (boks), pas un script.
-    const apiUrl = `${cleanBaseUrl}/api/services/boks/add_parcel`;
+    if (request.action === "GET_TODO_ITEMS") {
+        handleGetTodoItems()
+            .then(result => sendResponse({ success: true, items: result }))
+            .catch(error => {
+                console.error("Error in handleGetTodoItems:", error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
 
-    try {
-        const response = await fetch(apiUrl, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json",
-            },
-            // Pour un Service d'intégration, les champs sont à la racine
-            body: JSON.stringify({
-                description: description
-            })
+    if (request.action === "UPDATE_TODO_ITEM") {
+        handleUpdateTodoItem(request.uid, request.status, request.summary)
+            .then(() => sendResponse({ success: true }))
+            .catch(error => {
+                console.error("Error in handleUpdateTodoItem:", error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
+
+    if (request.action === "GET_TODO_ENTITIES") {
+        handleGetTodoEntities(request.haUrl, request.haToken)
+            .then(result => sendResponse({ success: true, entities: result }))
+            .catch(error => {
+                console.error("Error in handleGetTodoEntities:", error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
+});
+
+// --- WebSocket Client Class ---
+
+class HAWebSocket {
+    constructor(baseUrl, token) {
+        this.baseUrl = baseUrl.replace(/\/$/, "");
+        this.token = token;
+        this.socket = null;
+        this.messageId = 1;
+        this.pendingRequests = new Map();
+        this.isConnected = false;
+        this.isAuthenticated = false;
+    }
+
+    async connect() {
+        if (this.isConnected && this.isAuthenticated) return;
+
+        return new Promise((resolve, reject) => {
+            let wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/websocket";
+            console.log("Connecting to WebSocket:", wsUrl);
+
+            try {
+                this.socket = new WebSocket(wsUrl);
+            } catch (e) {
+                reject(new Error(`Failed to create WebSocket: ${e.message}`));
+                return;
+            }
+
+            this.socket.onopen = () => {
+                console.log("WebSocket connection opened");
+                this.isConnected = true;
+            };
+
+            this.socket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    this.handleMessage(message, resolve, reject);
+                } catch (e) {
+                    console.error("Error processing WebSocket message:", e);
+                }
+            };
+
+            this.socket.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                this.isConnected = false;
+                this.isAuthenticated = false;
+                reject(new Error("WebSocket connection error"));
+            };
+
+            this.socket.onclose = (event) => {
+                console.log("WebSocket connection closed", event.code, event.reason);
+                this.isConnected = false;
+                this.isAuthenticated = false;
+            };
         });
+    }
 
-        if (!response.ok) {
-            throw new Error(chrome.i18n.getMessage("errorHttp", [response.status.toString()]));
+    handleMessage(message, connectResolve, connectReject) {
+        console.log("WS Message received:", message);
+
+        if (message.type === "auth_required") {
+            this.socket.send(JSON.stringify({
+                type: "auth",
+                access_token: this.token
+            }));
+        } else if (message.type === "auth_ok") {
+            console.log("Authentication successful");
+            this.isAuthenticated = true;
+            if (connectResolve) connectResolve();
+        } else if (message.type === "auth_invalid") {
+            console.error("Authentication failed:", message.message);
+            this.isAuthenticated = false;
+            if (connectReject) connectReject(new Error(`Authentication failed: ${message.message}`));
+        } else if (message.type === "result") {
+            const req = this.pendingRequests.get(message.id);
+            if (req) {
+                if (message.success) {
+                    req.resolve(message.result);
+                } else {
+                    req.reject(new Error(message.error ? message.error.message : "Unknown error"));
+                }
+                this.pendingRequests.delete(message.id);
+            }
+        }
+    }
+
+    async sendRequest(type, payload = {}) {
+        await this.connect();
+
+        return new Promise((resolve, reject) => {
+            const id = this.messageId++;
+            this.pendingRequests.set(id, { resolve, reject });
+
+            const message = {
+                id,
+                type,
+                ...payload
+            };
+
+            this.socket.send(JSON.stringify(message));
+        });
+    }
+
+    async callService(domain, service, serviceData, returnResponse = false) {
+        const payload = {
+            domain,
+            service,
+            service_data: serviceData
+        };
+        if (returnResponse) {
+            payload.return_response = true;
+        }
+        return this.sendRequest("call_service", payload);
+    }
+
+    close() {
+        if (this.socket) {
+            this.socket.close();
+        }
+    }
+}
+
+// --- Handlers ---
+
+async function getHAConnection() {
+    const config = await chrome.storage.sync.get(['haUrl', 'haToken']);
+    if (!config.haUrl || !config.haToken) {
+        throw new Error("Configuration missing");
+    }
+    return new HAWebSocket(config.haUrl, config.haToken);
+}
+
+/**
+ * Handle adding a parcel from the popup
+ */
+async function handleAddParcel(description) {
+    try {
+        const config = await chrome.storage.sync.get(['selectedTodoEntityId']);
+        if (!config.selectedTodoEntityId) {
+            throw new Error("No Todo List entity configured.");
         }
 
-        // Home Assistant renvoie un tableau JSON.
-        // Si supports_response est activé, il contient votre dictionnaire.
-        const data = await response.json();
+        const ha = await getHAConnection();
+        try {
+            const response = await ha.callService("boks", "add_parcel", {
+                entity_id: config.selectedTodoEntityId,
+                description: description
+            }, true); // return_response = true
 
-        // Log pour voir la structure exacte dans la console du navigateur
-        console.log("Réponse brute HA:", data);
+            // Response structure: { response: { code: "..." } } or just { code: "..." } depending on HA version
+            let code = null;
+            if (response && response.response && response.response.code) {
+                code = response.response.code;
+            } else if (response && response.code) {
+                code = response.code;
+            }
 
-        // Récupération du code
-        // La structure reçue est : { "code": "123456", "context": {...} }
-        if (data && data.code) {
-            return data.code;
-        } else {
-            console.warn("Pas de code dans la réponse");
-            return null;
+            return code;
+        } finally {
+            ha.close();
+        }
+    } catch (err) {
+        console.error("Error adding parcel:", err);
+        throw err;
+    }
+}
+
+/**
+ * Handle getting todo items from Home Assistant
+ */
+async function handleGetTodoItems() {
+    try {
+        const config = await chrome.storage.sync.get(['selectedTodoEntityId']);
+        if (!config.selectedTodoEntityId) {
+            throw new Error("No Todo entity selected");
         }
 
-    } catch (error) {
-        console.error("Erreur lors de l'appel API:", error);
-        return null;
+        const ha = await getHAConnection();
+        try {
+            return await ha.sendRequest("todo/item/list", {
+                entity_id: config.selectedTodoEntityId
+            });
+        } finally {
+            ha.close();
+        }
+    } catch (err) {
+        console.error("Error getting todo items:", err);
+        throw err;
+    }
+}
+
+/**
+ * Handle updating a todo item (mark as completed/uncompleted)
+ */
+async function handleUpdateTodoItem(uid, status, summary) {
+    try {
+        const config = await chrome.storage.sync.get(['selectedTodoEntityId']);
+        if (!config.selectedTodoEntityId) {
+            throw new Error("No Todo entity selected");
+        }
+
+        const ha = await getHAConnection();
+        try {
+            await ha.callService("todo", "update_item", {
+                entity_id: config.selectedTodoEntityId,
+                item: uid,
+                status: status,
+                // summary: summary // Optional but good practice
+            });
+            return true;
+        } finally {
+            ha.close();
+        }
+    } catch (err) {
+        console.error("Error updating todo item:", err);
+        throw err;
+    }
+}
+
+/**
+ * Handle getting all todo entities
+ */
+async function handleGetTodoEntities(haUrl, haToken) {
+    try {
+        // Use provided credentials or fallback to storage
+        let url = haUrl;
+        let token = haToken;
+
+        if (!url || !token) {
+            const config = await chrome.storage.sync.get(['haUrl', 'haToken']);
+            url = config.haUrl;
+            token = config.haToken;
+        }
+
+        if (!url || !token) {
+            throw new Error("Configuration missing");
+        }
+
+        const ha = new HAWebSocket(url, token);
+        try {
+            const states = await ha.sendRequest("get_states");
+            return states.filter(state => state.entity_id.startsWith("todo."));
+        } finally {
+            ha.close();
+        }
+    } catch (err) {
+        console.error("Error getting todo entities:", err);
+        throw err;
+    }
+}
+
+// Also expose addParcelAndGetCode for the context menu workflow
+async function addParcelAndGetCode(baseUrl, token, description) {
+    // This function is called by handleMenuClick which passes url/token directly
+    // We can reuse our HAWebSocket class
+    try {
+        const config = await chrome.storage.sync.get(['selectedTodoEntityId']);
+        if (!config.selectedTodoEntityId) {
+            throw new Error("No Todo List entity configured.");
+        }
+
+        const ha = new HAWebSocket(baseUrl, token);
+        try {
+            const response = await ha.callService("boks", "add_parcel", {
+                entity_id: config.selectedTodoEntityId,
+                description: description
+            }, true);
+
+            let code = null;
+            if (response && response.response && response.response.code) {
+                code = response.response.code;
+            } else if (response && response.code) {
+                code = response.code;
+            }
+            return code;
+        } finally {
+            ha.close();
+        }
+    } catch (err) {
+        console.error("Error in addParcelAndGetCode:", err);
+        throw err;
     }
 }
 

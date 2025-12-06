@@ -12,7 +12,7 @@
     "message": "Package description (e.g. Amazon, Clothes):"
   },
   "promptDefault": {
-    "message": "Online Purchase"
+    "message": "Book purchase"
   },
   "errorConfig": {
     "message": "Extension not configured. Please right-click extension icon > Options."
@@ -28,6 +28,9 @@
   },
   "labelToken": {
     "message": "Long-Lived Access Token"
+  },
+  "labelTodoEntity": {
+    "message": "Boks Todo List"
   },
   "btnSave": {
     "message": "Save"
@@ -48,5 +51,55 @@
   },
   "optionsPageTitle": {
     "message": "HA Extension Options"
+  },
+  "loadingEntities": {
+    "message": "Loading entities..."
+  },
+  "enterHaConfig": {
+    "message": "Enter HA config first"
+  },
+  "selectTodoEntity": {
+    "message": "Select a Todo entity"
+  },
+  "errorFetchingEntities": {
+    "message": "Error fetching entities"
+  },
+  "noBoksTodoEntities": {
+    "message": "No Boks Todo entities found. Showing all Todo entities."
+  },
+  "popupTitle": {
+    "message": "Add Parcel to Boks"
+  },
+  "parcelDescriptionLabel": {
+    "message": "Parcel Description:"
+  },
+  "parcelDescriptionPlaceholder": {
+    "message": "e.g. Amazon package, Clothes"
+  },
+  "addParcelButton": {
+    "message": "Add Parcel"
+  },
+  "successMessage": {
+    "message": "Parcel added successfully!"
+  },
+  "successMessageWithCode": {
+    "message": "Parcel added! Code: $code$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorMessage": {
+    "message": "Error adding parcel. Please try again."
+  },
+  "configRequiredMessage": {
+    "message": "Please configure the extension options first. Select a Todo entity to use."
+  },
+  "openOptionsButton": {
+    "message": "Open Options"
+  },
+  "copy_code": {
+    "message": "Copy code"
   }
 }

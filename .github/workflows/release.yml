@@ -5,14 +5,14 @@ on:
   release:
     types: [published]
 
-# Grant id-token so cosign keyless can use OIDC
+# Grant id-token so cosign keyless can use OIDC (kept for signatures)
 permissions:
   contents: write
   id-token: write
 
 jobs:
   build-and-attach:
-    name: Build, Sign and Attach Assets
+    name: Build, Sign and Attach Assets (ZIP + XPI)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -54,115 +54,47 @@ jobs:
             fi
           fi
 
-          # Create an XPI (ZIP with .xpi extension)
           FIREFOX_NAME="firefox-ha-boks-extension.xpi"
           zip -r "../${FIREFOX_NAME}" .
           cd ..
           echo "Created ${FIREFOX_NAME}"
         shell: bash
 
-      - name: Install crx3 & Pack Chrome ZIP + CRX
-        id: pack_crx
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          CRX_PRIVATE_KEY: ${{ secrets.CRX_KEY }}
+      - name: Create Chrome/Chromium ZIP (ha-boks-extension.zip)
         run: |
           set -euo pipefail
-          BASE="ha-boks-extension"
-          CHROME_CRX="chrome-${BASE}.crx"
-          ZIP_NAME="${BASE}.zip"
-
-          if [ -z "${CRX_PRIVATE_KEY:-}" ]; then
-            echo "No CRX private key supplied — skipping CRX pack step."
-            exit 0
-          fi
-
-          KEYFILE=private.pem
-          if printf '%s' "$CRX_PRIVATE_KEY" | grep -q "BEGIN"; then
-            printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEYFILE"
+          if [ -d chrome_build ]; then
+            cd chrome_build
+            zip -r ../ha-boks-extension.zip .
+            cd ..
+            echo "Created ha-boks-extension.zip"
           else
-            echo "$CRX_PRIVATE_KEY" | base64 --decode > "$KEYFILE" || { echo "Failed to decode CRX_KEY as base64"; exit 4; }
+            echo "chrome_build not found, skipping zip creation"; exit 1
           fi
-          chmod 600 "$KEYFILE"
-
-          if [ -z "${RELEASE_TAG:-}" ]; then
-            CRX_URL=""
-          else
-            CRX_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${CHROME_CRX}"
-          fi
-          echo "Computed CRX URL: ${CRX_URL}"
-
-          APP_VERSION=""
-          if [ -n "${RELEASE_TAG:-}" ]; then
-            APP_VERSION="${RELEASE_TAG#v}"
-            APP_VERSION="${APP_VERSION#V}"
-          fi
-          if [ -z "${APP_VERSION}" ] && [ -f chrome_build/manifest.json ]; then
-            APP_VERSION=$(jq -r '.version // empty' chrome_build/manifest.json || true)
-          fi
-          if [ -z "${APP_VERSION}" ]; then APP_VERSION="0.0.0"; fi
-
-          if [ -n "${CRX_URL}" ]; then
-            npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" --crxURL "$CRX_URL" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
-          else
-            npx --yes crx3 pack chrome_build -p "$KEYFILE" -o "${CHROME_CRX}" -z "${ZIP_NAME}" --appVersion "$APP_VERSION" || { echo "crx3 packing failed"; rm -f "$KEYFILE"; exit 5; }
-          fi
-
-          shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
-          echo "CRX and Chrome ZIP created: ${CHROME_CRX}, ${ZIP_NAME}"
         shell: bash
 
-      - name: Install cosign
+      - name: Install cosign (pinned) with fallback
         run: |
           set -euo pipefail
-
-          # Pin a recent cosign release known to support keyless behaviour for sign-blob
           COSIGN_VERSION="v2.4.1"
           COSIGN_BIN="/usr/local/bin/cosign"
 
-          echo "Attempting to download cosign ${COSIGN_VERSION} to ${COSIGN_BIN}..."
           if curl -fSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" -o "$COSIGN_BIN"; then
             chmod +x "$COSIGN_BIN"
-            echo "Downloaded cosign to $COSIGN_BIN"
           else
-            echo "Failed to download cosign binary from GitHub releases. Will try docker image fallback..."
             if command -v docker >/dev/null 2>&1; then
               docker run --rm --entrypoint cat "ghcr.io/sigstore/cosign/cosign:${COSIGN_VERSION}" /ko-app/cosign > "$COSIGN_BIN"
               chmod +x "$COSIGN_BIN"
-              echo "Extracted cosign from GHCR image to $COSIGN_BIN"
             else
-              echo "ERROR: could not download cosign and docker not available for fallback. Exiting."
-              exit 2
+              echo "ERROR: could not download cosign and docker not available for fallback. Exiting."; exit 2
             fi
           fi
 
-          echo "Checking cosign binary at $COSIGN_BIN"
-          # Try both 'version' and '--version' to be tolerant with variants
-          if "$COSIGN_BIN" version >/dev/null 2>&1; then
-            "$COSIGN_BIN" version || true
-          elif "$COSIGN_BIN" --version >/dev/null 2>&1; then
-            "$COSIGN_BIN" --version || true
-          else
-            echo "Warning: cosign did not accept 'version' or '--version' flags. Continuing, will check sign-blob help next."
-          fi
-
-          # Ensure sign-blob supports non-key signing (we avoid using --keyless flag)
-          if ! "$COSIGN_BIN" sign-blob --help 2>&1 | grep -q -- '--output-signature'; then
-            echo "ERROR: the installed cosign ($COSIGN_BIN) does not appear to support sign-blob with --output-signature."
-            echo "Output of $COSIGN_BIN sign-blob --help:"
-            "$COSIGN_BIN" sign-blob --help 2>&1 || true
-            echo "Please pick a newer cosign release. Failing job to let you fix it."
-            exit 4
-          fi
-
-          echo "Cosign installed and basic sign-blob support present. Exporting COSIGN_BIN"
           echo "COSIGN_BIN=$COSIGN_BIN" >> "$GITHUB_ENV"
         shell: bash
 
-      - name: Sign all artifacts with cosign (keyless) and record provenance
-        if: success() && steps.pack_crx.outcome == 'success'
+      - name: Sign artifacts with cosign (non-interactive via Actions OIDC) and record provenance
+        if: success()
         env:
           COSIGN_EXPERIMENTAL: "1"
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -173,21 +105,17 @@ jobs:
           COSIGN_BIN="${COSIGN_BIN:-/usr/local/bin/cosign}"
           mkdir -p provenance
 
-          BASE="ha-boks-extension"
-          CHROME_CRX="chrome-${BASE}.crx"
-          ZIP_NAME="${BASE}.zip"
-          FIREFOX_NAME="firefox-${BASE}.xpi"
+          ZIP_NAME="ha-boks-extension.zip"
+          FIREFOX_NAME="firefox-ha-boks-extension.xpi"
 
           artifacts=(
             "${ZIP_NAME}"
             "${FIREFOX_NAME}"
-            "${CHROME_CRX}"
           )
 
-          # certificate identity regexp (matches repo URL in cert 'subject' or 'extensions')
+          # Build recommended regexps for certificate verification (used in CI verification output)
           CERT_IDENTITY_REGEXP="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.*"
-          # certificate oidc issuer regexp: GitHub Actions OIDC provider
-          CERT_OIDC_ISSUER_REGEXP="${CERT_OIDC_ISSUER_REGEXP:-https://token.actions.githubusercontent.com.*}"
+          CERT_OIDC_ISSUER_REGEXP="https://token.actions.githubusercontent.com.*"
 
           echo "Using certificate identity regexp: $CERT_IDENTITY_REGEXP"
           echo "Using certificate oidc issuer regexp: $CERT_OIDC_ISSUER_REGEXP"
@@ -206,7 +134,6 @@ jobs:
             "$COSIGN_BIN" sign-blob -y --oidc-provider github-actions --output-signature "$sig" --output-certificate "$cert" "$f"
 
             echo "Verifying $f and saving output to $prov"
-            # verify with certificate file and require expected certificate identity and issuer regexps
             "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" --certificate-oidc-issuer-regexp "$CERT_OIDC_ISSUER_REGEXP" "$f" 2>&1 | tee "$prov"
 
             echo "Signed $f -> $sig and $cert; verification written to $prov"
@@ -217,12 +144,8 @@ jobs:
         run: |
           echo "Artifacts in workspace:"
           ls -alh
-          echo "--- ha-boks-extension.zip content (if present) ---"
           test -f ha-boks-extension.zip && unzip -l ha-boks-extension.zip || true
-          echo "--- firefox-ha-boks-extension.xpi content (if present) ---"
           test -f firefox-ha-boks-extension.xpi && unzip -l firefox-ha-boks-extension.xpi || true
-          echo "--- chrome-ha-boks-extension.crx present? ---"
-          test -f chrome-ha-boks-extension.crx && echo "Found chrome-ha-boks-extension.crx" || true
           echo "--- provenance files ---"
           ls -alh provenance || true
         shell: bash
@@ -245,12 +168,7 @@ jobs:
               'firefox-ha-boks-extension.xpi',
               'firefox-ha-boks-extension.xpi.sig',
               'firefox-ha-boks-extension.xpi.cert',
-              'provenance/firefox-ha-boks-extension.xpi.verify.txt',
-
-              'chrome-ha-boks-extension.crx',
-              'chrome-ha-boks-extension.crx.sig',
-              'chrome-ha-boks-extension.crx.cert',
-              'provenance/chrome-ha-boks-extension.crx.verify.txt'
+              'provenance/firefox-ha-boks-extension.xpi.verify.txt'
             ];
 
             for (const file of files) {
@@ -273,7 +191,7 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
-      - name: Append verification instructions to release notes
+      - name: Append short verification note to release notes
         uses: actions/github-script@v7
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -286,21 +204,36 @@ jobs:
             const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
             const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
 
-            // Build the recommended certificate identity & issuer regexps to use with cosign verify-blob
-            const certRegexp = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.*`;
-            const issuerRegexp = 'https://token.actions.githubusercontent.com.*';
+              console.log('Release notes updated with short verification info.');
+              '```',
+              '# ZIP:',
+              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip`,
+              '# Firefox XPI:',
+              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi`,
+              '```',
+              'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
+              '',
+              'Quick docs: https://github.com/sigstore/cosign',
+              ''
+            ].join('\n');
 
-            const verificationBlock = [
-              '',
-              '## Signature verification (Provenance)',
-              '',
-              'The artifacts published with this release are signed using Sigstore / cosign (keyless mode when available).',
-              'To verify locally that the files were produced by this build, install cosign and run, for example:',
-              '',
-              `- CRX (Chrome): \`cosign verify-blob --signature chrome-ha-boks-extension.crx.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/chrome-ha-boks-extension.crx\``,
-              `- Chrome ZIP: \`cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip\``,
-              `- Firefox XPI: \`cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi\``,
-              '',
+            const current = context.payload.release.body || '';
+            const newBody = current + '\n\n' + verificationBlock;
+
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: releaseId,
+              body: newBody
+            });
+
+            console.log('Release notes updated with short verification info.');
+              '```',
+              `# ZIP:`,
+              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip`,
+              `# Firefox XPI:`,
+              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi`,
+              '```',
               'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
               '',
               'Quick docs: https://github.com/sigstore/cosign',

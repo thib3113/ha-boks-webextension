@@ -1,18 +1,18 @@
 {
   "extName": {
-    "message": "Générateur Code HA"
+    "message": "Ha Boks - Extension"
   },
   "extDescription": {
     "message": "Génère un code de boîte aux lettres via Home Assistant et l'insère dans le champ actif."
   },
   "menuTitle": {
-    "message": "Générer un code via Home Assistant"
+    "message": "Générer un code boks"
   },
   "promptMessage": {
-    "message": "Description du colis (ex: Amazon, Vêtements) :"
+    "message": "Description du colis (ex: Livres, Vêtements) :"
   },
   "promptDefault": {
-    "message": "Achat Internet"
+    "message": "Achat de livres"
   },
   "errorConfig": {
     "message": "Extension non configurée. Veuillez faire un clic-droit sur l'icône de l'extension > Options."
@@ -28,6 +28,9 @@
   },
   "labelToken": {
     "message": "Jeton d'accès longue durée (Long-Lived Access Token)"
+  },
+  "labelTodoEntity": {
+    "message": "Liste Todo Boks"
   },
   "btnSave": {
     "message": "Sauvegarder"
@@ -48,5 +51,55 @@
   },
   "optionsPageTitle": {
     "message": "Options de l'extension HA Boks"
+  },
+  "loadingEntities": {
+    "message": "Chargement des entités..."
+  },
+  "enterHaConfig": {
+    "message": "Entrez d'abord la configuration HA"
+  },
+  "selectTodoEntity": {
+    "message": "Sélectionnez une entité Todo"
+  },
+  "errorFetchingEntities": {
+    "message": "Erreur lors du chargement des entités"
+  },
+  "noBoksTodoEntities": {
+    "message": "Aucune entité Todo Boks trouvée. Affichage de toutes les entités Todo."
+  },
+  "popupTitle": {
+    "message": "Ajouter un colis à Boks"
+  },
+  "parcelDescriptionLabel": {
+    "message": "Description du colis :"
+  },
+  "parcelDescriptionPlaceholder": {
+    "message": "ex. Colis Amazon, Vêtements"
+  },
+  "addParcelButton": {
+    "message": "Ajouter le colis"
+  },
+  "successMessage": {
+    "message": "Colis ajouté avec succès !"
+  },
+  "successMessageWithCode": {
+    "message": "Colis ajouté ! Code : $code$",
+    "placeholders": {
+      "code": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorMessage": {
+    "message": "Erreur lors de l'ajout du colis. Veuillez réessayer."
+  },
+  "configRequiredMessage": {
+    "message": "Veuillez d'abord configurer les options de l'extension. Sélectionnez une entité Todo à utiliser."
+  },
+  "openOptionsButton": {
+    "message": "Ouvrir les options"
+  },
+  "copy_code": {
+    "message": "Copier le code"
   }
 }

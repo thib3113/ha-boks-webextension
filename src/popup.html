@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title data-i18n="popupTitle">Add Parcel to Boks</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            padding: 20px;
+            width: 300px;
+            background-color: #f9f9f9;
+            margin: 0;
+        }
+        h2 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        input:focus {
+            border-color: #03a9f4;
+            outline: none;
+        }
+        button {
+            margin-top: 20px;
+            width: 100%;
+            padding: 10px;
+            background: #03a9f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0288d1;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            display: none;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        /* Todo List Styles */
+        .todo-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .todo-checkbox {
+            margin-right: 10px;
+            cursor: pointer;
+            flex: 0 0 auto;
+            width: auto;
+            margin-top: 0;
+            padding: 0;
+        }
+        
+        .todo-content {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            padding-right: 5px;
+        }
+        
+        .todo-summary {
+            font-size: 13px;
+            color: #333;
+        }
+        
+        .todo-item.completed .todo-summary {
+            text-decoration: line-through;
+            color: #999;
+        }
+        
+        .todo-code-container {
+            display: flex;
+            align-items: center;
+            margin-top: 2px;
+        }
+        
+        .todo-code {
+            font-family: monospace;
+            background: #e3f2fd;
+            color: #0277bd;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+        
+        .copy-btn, .edit-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            width: auto;
+            margin-top: 0;
+        }
+        
+        .copy-btn:hover, .edit-btn:hover {
+            opacity: 1;
+        }
+        
+        .edit-btn {
+            margin-left: 5px;
+            flex: 0 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <h2 data-i18n="popupTitle">Add Parcel to Boks</h2>
+    
+    <div class="form-group">
+        <label for="description" data-i18n="parcelDescriptionLabel">Parcel Description:</label>
+        <input type="text" id="description" data-i18n-placeholder="parcelDescriptionPlaceholder" placeholder="e.g. Amazon package, Clothes">
+    </div>
+    
+    <div id="configRequiredMessage" style="display: none; margin-top: 15px; padding: 10px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; color: #856404;">
+        <p data-i18n="configRequiredMessage">Please configure the extension options first. Select a Todo entity to use.</p>
+        <button id="openOptions" data-i18n="openOptionsButton" style="margin-top: 10px; padding: 5px 10px; background: #03a9f4; color: white; border: none; border-radius: 4px; cursor: pointer;">Open Options</button>
+    </div>
+    
+    <button id="addParcel" data-i18n="addParcelButton">Add Parcel</button>
+    
+    <div id="message"></div>
+    
+    <!-- Todo List Section -->
+    <div id="todoListSection" style="margin-top: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 10px; color: #333; border-bottom: 1px solid #ddd; padding-bottom: 5px;">Current Parcels</h3>
+        <div id="todoListContainer">
+            <p id="loadingTodoList" style="font-style: italic; color: #666;">Loading parcels...</p>
+            <ul id="todoList" style="list-style-type: none; padding: 0; margin: 0; display: none;"></ul>
+            <p id="noTodoItems" style="font-style: italic; color: #666; display: none;">No parcels found.</p>
+        </div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
