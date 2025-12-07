@@ -214,12 +214,15 @@ class HAWebSocket {
         });
     }
 
-    async callService(domain, service, serviceData, returnResponse = false) {
+    async callService(domain, service, serviceData, target = null, returnResponse = false) {
         const payload = {
             domain,
             service,
             service_data: serviceData
         };
+        if (target) {
+            payload.target = target;
+        }
         if (returnResponse) {
             payload.return_response = true;
         }
@@ -256,9 +259,10 @@ async function handleAddParcel(description) {
         const ha = await getHAConnection();
         try {
             const response = await ha.callService("boks", "add_parcel", {
-                entity_id: config.selectedTodoEntityId,
                 description: description
-            }, true); // return_response = true
+            }, { entity_id: config.selectedTodoEntityId }, true); // target, return_response = true
+
+            console.log("[Boks] Service Response:", JSON.stringify(response));
 
             // Response structure: { response: { code: "..." } } or just { code: "..." } depending on HA version
             let code = null;
@@ -266,7 +270,11 @@ async function handleAddParcel(description) {
                 code = response.response.code;
             } else if (response && response.code) {
                 code = response.code;
+            } else {
+                console.warn("[Boks] Could not find code in response:", response);
             }
+
+            console.log("[Boks] Extracted code:", code);
 
             return code;
         } finally {
@@ -315,11 +323,10 @@ async function handleUpdateTodoItem(uid, status, summary) {
         const ha = await getHAConnection();
         try {
             await ha.callService("todo", "update_item", {
-                entity_id: config.selectedTodoEntityId,
                 item: uid,
                 status: status,
                 // summary: summary // Optional but good practice
-            });
+            }, { entity_id: config.selectedTodoEntityId });
             return true;
         } finally {
             ha.close();
@@ -375,16 +382,18 @@ async function addParcelAndGetCode(baseUrl, token, description) {
         const ha = new HAWebSocket(baseUrl, token);
         try {
             const response = await ha.callService("boks", "add_parcel", {
-                entity_id: config.selectedTodoEntityId,
                 description: description
-            }, true);
+            }, { entity_id: config.selectedTodoEntityId }, true);
 
-            let code = null;
-            if (response && response.response && response.response.code) {
-                code = response.response.code;
-            } else if (response && response.code) {
-                code = response.code;
+            console.log("[Boks] Service Response (Menu):", JSON.stringify(response));
+
+            const code = response?.response?.code ?? response?.code;
+
+            if(!code) {
+                 console.warn("[Boks] Could not find code in response (Menu):", response);
             }
+
+            console.log("[Boks] Extracted code (Menu):", code);
             return code;
         } finally {
             ha.close();

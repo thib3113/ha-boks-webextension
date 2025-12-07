@@ -264,18 +264,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Pre-fill description with "colis {domain}"
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-        if (tabs && tabs.length > 0) {
-            const tab = tabs[0];
-            const initialValue = chrome.i18n.getMessage("promptDefault");
-            
-            if (initialValue) {
-                descriptionInput.value = initialValue;
-            }
-        }
-    });
-
     // Check if entity_id is configured
     chrome.storage.sync.get(['selectedTodoEntityId'], (config) => {
         const entityId = config.selectedTodoEntityId;
@@ -321,10 +309,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 description: description
             });
 
+            console.log("Popup received from background:", response);
+
             // Handle response
             if (response && response.success) {
                 const successMessage = response.code
-                    ? (chrome.i18n.getMessage("successMessageWithCode") || `Parcel added! Code: ${response.code}`)
+                    ? (chrome.i18n.getMessage("successMessageWithCode", [response.code]) || `Parcel added! Code: ${response.code}`)
                     : (chrome.i18n.getMessage("successMessage") || "Parcel added successfully!");
                 showMessage(successMessage, true);
                 // Clear input

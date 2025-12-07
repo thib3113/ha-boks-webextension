@@ -74,7 +74,7 @@
     "message": "Description du colis :"
   },
   "parcelDescriptionPlaceholder": {
-    "message": "ex. Colis Amazon, Vêtements"
+    "message": "ex. Livres, Vêtements"
   },
   "addParcelButton": {
     "message": "Ajouter le colis"

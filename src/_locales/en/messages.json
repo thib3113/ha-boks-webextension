@@ -9,7 +9,7 @@
     "message": "Generate Code via Home Assistant"
   },
   "promptMessage": {
-    "message": "Package description (e.g. Amazon, Clothes):"
+    "message": "Package description (e.g. Books, Clothes):"
   },
   "promptDefault": {
     "message": "Book purchase"
@@ -74,7 +74,7 @@
     "message": "Parcel Description:"
   },
   "parcelDescriptionPlaceholder": {
-    "message": "e.g. Amazon package, Clothes"
+    "message": "e.g. Books, Clothes"
   },
   "addParcelButton": {
     "message": "Add Parcel"
