@@ -204,7 +204,8 @@ jobs:
             const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
             const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
 
-              console.log('Release notes updated with short verification info.');
+            console.log('Release notes updated with short verification info.');
+            const verificationBlock = [
               '```',
               '# ZIP:',
               `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip`,
