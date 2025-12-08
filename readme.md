@@ -1,5 +1,3 @@
-NOT WORKING - Work in progress
-
 # ha-boks Web Extension
 
 This README is written in English first. Pour la version française: [aller à la section française](#français---français).
