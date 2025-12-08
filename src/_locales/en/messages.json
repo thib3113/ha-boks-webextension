@@ -6,7 +6,7 @@
     "message": "Generates a mailbox code via Home Assistant and inserts it into the active field."
   },
   "menuTitle": {
-    "message": "Generate Code via Home Assistant"
+    "message": "Generate a Boks Code"
   },
   "promptMessage": {
     "message": "Package description (e.g. Books, Clothes):"
