@@ -204,18 +204,22 @@ jobs:
             const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
             const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
 
-            console.log('Release notes updated with short verification info.');
+            // Define regexps for cosign verification command example
+            const certRegexp = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.*`;
+            const issuerRegexp = "https://token.actions.githubusercontent.com.*";
+
+            console.log('Updating release notes with short verification info...');
             const verificationBlock = [
-              '```',
+              '### Verification',
+              '```bash',
               '# ZIP:',
-              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip`,
+              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp "${certRegexp}" --certificate-oidc-issuer-regexp "${issuerRegexp}" ${base}/ha-boks-extension.zip`,
               '# Firefox XPI:',
-              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi`,
+              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp "${certRegexp}" --certificate-oidc-issuer-regexp "${issuerRegexp}" ${base}/firefox-ha-boks-extension.xpi`,
               '```',
               'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
               '',
-              'Quick docs: https://github.com/sigstore/cosign',
-              ''
+              'Quick docs: https://github.com/sigstore/cosign'
             ].join('\n');
 
             const current = context.payload.release.body || '';
@@ -228,25 +232,4 @@ jobs:
               body: newBody
             });
 
-            console.log('Release notes updated with short verification info.');
-              '```',
-              `# ZIP:`,
-              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/ha-boks-extension.zip`,
-              `# Firefox XPI:`,
-              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp \"${certRegexp}\" --certificate-oidc-issuer-regexp \"${issuerRegexp}\" ${base}/firefox-ha-boks-extension.xpi`,
-              '```',
-              'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
-              '',
-              'Quick docs: https://github.com/sigstore/cosign',
-              ''
-            ].join('\n');
-
-            const current = context.payload.release.body || '';
-            const newBody = current + '\n\n' + verificationBlock;
-
-            await github.rest.repos.updateRelease({
-              owner,
-              repo,
-              release_id: releaseId,
-              body: newBody
-            });
+            console.log('Release notes updated.');
