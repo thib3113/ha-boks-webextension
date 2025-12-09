@@ -1,5 +1,9 @@
 # ha-boks Web Extension
 
+<p align="center">
+  <img src="src/icons/icon-128.png" alt="ha-boks Web Extension Icon" width="128" height="128">
+</p>
+
 This README is written in English first. Pour la version française: [aller à la section française](#français---français).
 
 Short summary
