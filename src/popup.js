@@ -68,14 +68,14 @@ async function fetchAndDisplayTodoItems() {
             // Display error
             console.error("Error fetching todo items:", response ? response.error : "Unknown error");
             todoListElement.style.display = 'none';
-            noItemsElement.textContent = "Error loading parcels.";
+            noItemsElement.textContent = chrome.i18n.getMessage("errorLoadingParcels");
             noItemsElement.style.display = 'block';
         }
     } catch (error) {
         console.error("Error sending message to background script:", error);
         loadingElement.style.display = 'none';
         todoListElement.style.display = 'none';
-        noItemsElement.textContent = "Error loading parcels.";
+        noItemsElement.textContent = chrome.i18n.getMessage("errorLoadingParcels");
         noItemsElement.style.display = 'block';
     }
 }
@@ -205,10 +205,10 @@ function displayTodoItems(items) {
             const editBtn = document.createElement('button');
             editBtn.className = 'edit-btn';
             editBtn.innerHTML = '✏️';
-            editBtn.title = 'Edit';
+            editBtn.title = chrome.i18n.getMessage("editTaskTitle");
             editBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                const newSummary = prompt("Edit task:", item.summary);
+                const newSummary = prompt(chrome.i18n.getMessage("editTaskPrompt"), item.summary);
                 if (newSummary !== null && newSummary !== item.summary) {
                     try {
                         await chrome.runtime.sendMessage({
@@ -220,7 +220,7 @@ function displayTodoItems(items) {
                         fetchAndDisplayTodoItems();
                     } catch (error) {
                         console.error("Error updating item:", error);
-                        alert("Failed to update item");
+                        alert(chrome.i18n.getMessage("updateFailedAlert"));
                     }
                 }
             });
@@ -317,6 +317,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? (chrome.i18n.getMessage("successMessageWithCode", [response.code]) || `Parcel added! Code: ${response.code}`)
                     : (chrome.i18n.getMessage("successMessage") || "Parcel added successfully!");
                 showMessage(successMessage, true);
+                
+                // Auto-copy to clipboard
+                if (response.code) {
+                    navigator.clipboard.writeText(response.code).then(() => {
+                        console.log('Code copied to clipboard');
+                    }).catch(err => {
+                        console.error('Failed to copy code: ', err);
+                    });
+                }
+
                 // Clear input
                 descriptionInput.value = '';
 

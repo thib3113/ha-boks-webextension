@@ -1,3 +1,6 @@
+import { HAWebSocket } from './ha-client.js';
+import { DEFAULT_HA_URL } from './const.js';
+
 // 1. Localization Logic
 // Automatically replace textContent of elements with data-i18n attribute
 function localizeHtmlPage() {
@@ -23,7 +26,7 @@ function localizeHtmlPage() {
 }
 
 // Fetch todo entities from Home Assistant
-async function fetchTodoEntities(haUrl, haToken) {
+async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
     const entitySelect = document.getElementById('selectedTodoEntityId');
     const entityError = document.getElementById('entityError');
 
@@ -74,6 +77,11 @@ async function fetchTodoEntities(haUrl, haToken) {
         // Enable the select
         entitySelect.disabled = false;
 
+        // Restore selection if provided
+        if (selectedId) {
+            entitySelect.value = selectedId;
+        }
+
         // Show message if no boks entities found
         if (todoEntities.length === 0 && filteredEntities.length > 0) {
             entityError.textContent = chrome.i18n.getMessage('noBoksTodoEntities') ||
@@ -91,15 +99,21 @@ async function fetchTodoEntities(haUrl, haToken) {
 
 // 2. Save Logic
 const saveOptions = () => {
-    const haUrl = document.getElementById('haUrl').value.trim();
+    let haUrl = document.getElementById('haUrl').value.trim();
     const haToken = document.getElementById('haToken').value.trim();
     const selectedTodoEntityId = document.getElementById('selectedTodoEntityId').value;
+
+    if (!haUrl) {
+        haUrl = DEFAULT_HA_URL;
+        document.getElementById('haUrl').value = haUrl;
+    }
 
     chrome.storage.sync.set(
         { haUrl: haUrl, haToken: haToken, selectedTodoEntityId: selectedTodoEntityId },
         () => {
             const status = document.getElementById('status');
             status.textContent = chrome.i18n.getMessage("msgSaved");
+            status.style.color = "green";
             setTimeout(() => {
                 status.textContent = '';
             }, 2000);
@@ -107,18 +121,90 @@ const saveOptions = () => {
     );
 };
 
+// Global variable to track the active WebSocket instance
+let currentTestHA = null;
+
+// Test Connection Logic
+const testConnection = async () => {
+    let haUrl = document.getElementById('haUrl').value.trim();
+    const haToken = document.getElementById('haToken').value.trim();
+    const status = document.getElementById('status');
+
+    if (!haUrl) haUrl = DEFAULT_HA_URL;
+
+    if (!haToken) {
+        status.textContent = chrome.i18n.getMessage("enterHaConfig");
+        status.style.color = "orange";
+        return;
+    }
+
+    // 1. Cancel/Close previous connection if exists
+    if (currentTestHA) {
+        console.log("Aborting previous connection attempt...");
+        currentTestHA.close(); 
+        currentTestHA = null;
+    }
+
+    status.textContent = "Connecting...";
+    status.style.color = "blue";
+
+    // 2. Create new instance
+    const ha = new HAWebSocket(haUrl, haToken);
+    currentTestHA = ha; // Track this specific instance
+
+    try {
+        await ha.connect();
+        
+        // 3. Check if we are still the active instance
+        // (If user clicked test again, currentTestHA would be different)
+        if (ha !== currentTestHA) {
+            console.log("Ignoring result from cancelled connection");
+            return;
+        }
+
+        // Just checking authentication is enough for a basic test
+        if (ha.isAuthenticated) {
+             status.textContent = chrome.i18n.getMessage("connectionSuccess");
+             status.style.color = "green";
+        } else {
+             throw new Error("Not authenticated");
+        }
+    } catch (error) {
+        // 4. Check if we are still the active instance
+        if (ha !== currentTestHA) {
+            console.log("Ignoring error from cancelled connection");
+            return;
+        }
+        console.error("Connection test failed:", error);
+        status.textContent = chrome.i18n.getMessage("connectionFailed", [error.message]);
+        status.style.color = "red";
+    } finally {
+        // Only close if it's the current one and we are done testing
+        // OR if we want to clean up the test connection immediately after success/fail
+        // Usually good practice to close test connections
+        if (ha === currentTestHA) {
+            ha.close();
+            currentTestHA = null;
+        } else {
+            // It was already closed/replaced, nothing to do
+        }
+    }
+};
+
 // 3. Restore Logic
 const restoreOptions = () => {
     chrome.storage.sync.get(
-        { haUrl: '', haToken: '', selectedTodoEntityId: '' },
+        { haUrl: DEFAULT_HA_URL, haToken: '', selectedTodoEntityId: '' },
         (items) => {
             document.getElementById('haUrl').value = items.haUrl;
             document.getElementById('haToken').value = items.haToken;
+            // Set value here too, in case fetch fails or takes time (it will show empty if not in list yet, but good practice)
             document.getElementById('selectedTodoEntityId').value = items.selectedTodoEntityId;
 
             // If we have URL and token, fetch entities
             if (items.haUrl && items.haToken) {
-                fetchTodoEntities(items.haUrl, items.haToken);
+                // Pass the saved entity ID so it can be re-selected after fetching
+                fetchTodoEntities(items.haUrl, items.haToken, items.selectedTodoEntityId);
             }
         }
     );
@@ -145,8 +231,15 @@ function setupEntityFetching() {
 
     // Function to handle input changes with debounce
     const handleInputChange = debounce(() => {
-        const haUrl = haUrlInput.value.trim();
+        let haUrl = haUrlInput.value.trim();
         const haToken = haTokenInput.value.trim();
+
+        // Use default if empty (visual feedback logic handled elsewhere, but for fetching we need a value)
+        if (!haUrl) haUrl = DEFAULT_HA_URL;
+
+        // Clear any previous connection status messages as config has changed
+        const status = document.getElementById('status');
+        if (status) status.textContent = '';
 
         if (haUrl && haToken) {
             // Enable the select and show loading state
@@ -179,5 +272,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('save').addEventListener('click', (e) => {
         e.preventDefault();
         saveOptions();
+    });
+    document.getElementById('testConnection').addEventListener('click', (e) => {
+        e.preventDefault();
+        testConnection();
     });
 });

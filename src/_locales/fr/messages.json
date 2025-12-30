@@ -1,48 +1,62 @@
 {
   "extName": {
-    "message": "Ha Boks - Extension"
+    "message": "HA Boks - Code Generator"
   },
   "extDescription": {
-    "message": "Génère un code de boîte aux lettres via Home Assistant et l'insère dans le champ actif."
+    "message": "Generates a mailbox code via Home Assistant and inserts it into the active field."
   },
   "menuTitle": {
-    "message": "Générer un code boks"
+    "message": "Generate a Boks Code"
   },
   "promptMessage": {
-    "message": "Description du colis (ex: Livres, Vêtements) :"
+    "message": "Package description (e.g. Books, Clothes):"
   },
   "promptDefault": {
-    "message": "Achat de livres"
+    "message": "Book purchase"
   },
   "errorConfig": {
-    "message": "Extension non configurée. Veuillez faire un clic-droit sur l'icône de l'extension > Options."
+    "message": "Extension not configured. Please right-click extension icon > Options."
   },
   "errorNetwork": {
-    "message": "Erreur de communication avec Home Assistant."
+    "message": "Communication error with Home Assistant."
   },
   "optionsTitle": {
-    "message": "Configuration Home Assistant"
+    "message": "Home Assistant Configuration"
   },
   "labelUrl": {
-    "message": "URL de Home Assistant (ex: http://homeassistant.local:8123)"
+    "message": "Home Assistant URL"
   },
   "labelToken": {
-    "message": "Jeton d'accès longue durée (Long-Lived Access Token)"
+    "message": "Long-Lived Access Token"
   },
   "labelTodoEntity": {
-    "message": "Liste Todo Boks"
+    "message": "Boks Todo List"
   },
   "btnSave": {
-    "message": "Sauvegarder"
+    "message": "Save"
+  },
+  "btnTestConnection": {
+    "message": "Test Connection"
+  },
+  "connectionSuccess": {
+    "message": "Connection successful! (Authenticated)"
+  },
+  "connectionFailed": {
+    "message": "Connection failed: $error$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
   },
   "msgSaved": {
-    "message": "Configuration sauvegardée !"
+    "message": "Configuration saved!"
   },
   "extensionPrefix": {
     "message": "[HA Extension] "
   },
   "errorHttp": {
-    "message": "Erreur HTTP : $STATUS$",
+    "message": "HTTP Error: $STATUS$",
     "placeholders": {
       "status": {
         "content": "$1"
@@ -50,40 +64,40 @@
     }
   },
   "optionsPageTitle": {
-    "message": "Options de l'extension HA Boks"
+    "message": "HA Extension Options"
   },
   "loadingEntities": {
-    "message": "Chargement des entités..."
+    "message": "Loading entities..."
   },
   "enterHaConfig": {
-    "message": "Entrez d'abord la configuration HA"
+    "message": "Enter HA config first"
   },
   "selectTodoEntity": {
-    "message": "Sélectionnez une entité Todo"
+    "message": "Select a Todo entity"
   },
   "errorFetchingEntities": {
-    "message": "Erreur lors du chargement des entités"
+    "message": "Error fetching entities"
   },
   "noBoksTodoEntities": {
-    "message": "Aucune entité Todo Boks trouvée. Affichage de toutes les entités Todo."
+    "message": "No Boks Todo entities found. Showing all Todo entities."
   },
   "popupTitle": {
-    "message": "Ajouter un colis à Boks"
+    "message": "Add Parcel to Boks"
   },
   "parcelDescriptionLabel": {
-    "message": "Description du colis :"
+    "message": "Parcel Description:"
   },
   "parcelDescriptionPlaceholder": {
-    "message": "ex. Livres, Vêtements"
+    "message": "e.g. Books, Clothes"
   },
   "addParcelButton": {
-    "message": "Ajouter le colis"
+    "message": "Add Parcel"
   },
   "successMessage": {
-    "message": "Colis ajouté avec succès !"
+    "message": "Parcel added successfully!"
   },
   "successMessageWithCode": {
-    "message": "Colis ajouté ! Code : $code$",
+    "message": "Parcel added! Code: $code$",
     "placeholders": {
       "code": {
         "content": "$1"
@@ -91,15 +105,36 @@
     }
   },
   "errorMessage": {
-    "message": "Erreur lors de l'ajout du colis. Veuillez réessayer."
+    "message": "Error adding parcel. Please try again."
   },
   "configRequiredMessage": {
-    "message": "Veuillez d'abord configurer les options de l'extension. Sélectionnez une entité Todo à utiliser."
+    "message": "Please configure the extension options first. Select a Todo entity to use."
   },
   "openOptionsButton": {
-    "message": "Ouvrir les options"
+    "message": "Open Options"
   },
   "copy_code": {
-    "message": "Copier le code"
+    "message": "Copy code"
+  },
+  "currentParcelsTitle": {
+    "message": "Current Parcels"
+  },
+  "loadingParcels": {
+    "message": "Loading parcels..."
+  },
+  "noParcelsFound": {
+    "message": "No parcels found."
+  },
+  "errorLoadingParcels": {
+    "message": "Error loading parcels."
+  },
+  "editTaskTitle": {
+    "message": "Edit"
+  },
+  "editTaskPrompt": {
+    "message": "Edit task:"
+  },
+  "updateFailedAlert": {
+    "message": "Failed to update item"
   }
 }

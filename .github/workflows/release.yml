@@ -1,22 +1,21 @@
-name: Build, Sign and Publish Extension
+name: Build, Attest and Publish Extension
 
 # Trigger on published releases
 on:
   release:
     types: [published]
 
-# Grant id-token so cosign keyless can use OIDC (kept for signatures)
+# Grant permissions for GitHub Attestations
 permissions:
   contents: write
   id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build-and-attach:
-    name: Build, Sign and Attach Assets (ZIP + XPI)
+    name: Build, Attest and Attach Assets (ZIP + XPI)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
 
     steps:
       - name: Checkout code
@@ -29,17 +28,44 @@ jobs:
         with:
           node-version: 'lts/*'
 
-      - name: Prepare build directories (copy only src)
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate version consistency and lint manifest
+        run: |
+          # Check if manifest is valid JSON
+          jq . src/manifest.json > /dev/null
+          
+          # Read version from package.json
+          PKG_VERSION=$(jq -r '.version' package.json)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          
+          echo "Package version: $PKG_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: Version mismatch!"
+            echo "The version in package.json ($PKG_VERSION) does not match the release tag ($TAG_VERSION)."
+            echo "Please update package.json before creating the release."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Build Extension
+        run: npm run build
+
+      - name: Prepare build directories (copy from dist)
         run: |
           set -euo pipefail
-          rm -rf build firefox_dist chrome_build provenance
-          mkdir -p build chrome_build firefox_dist provenance
+          rm -rf build firefox_dist chrome_build
+          mkdir -p build chrome_build firefox_dist
 
-          # Copy extension source to a clean build dir (avoid .github, .git, node_modules, etc.)
-          rsync -a --delete --exclude='.git' --exclude='.github' --exclude='node_modules' src/ chrome_build/
-          rsync -a --delete --exclude='.git' --exclude='.github' --exclude='node_modules' src/ firefox_dist/
+          # Copy built extension from dist/ to build dirs
+          # Note: The build script (npm run build) already puts everything in dist/
+          rsync -a --delete dist/ chrome_build/
+          rsync -a --delete dist/ firefox_dist/
 
-          echo "Prepared chrome_build/ and firefox_dist/ from src/"
+          echo "Prepared chrome_build/ and firefox_dist/ from dist/"
         shell: bash
 
       - name: Create Firefox XPI
@@ -73,72 +99,14 @@ jobs:
           fi
         shell: bash
 
-      - name: Install cosign (pinned) with fallback
-        run: |
-          set -euo pipefail
-          COSIGN_VERSION="v2.4.1"
-          COSIGN_BIN="/usr/local/bin/cosign"
+      - name: Generate Checksums
+        run: shasum -a 256 ha-boks-extension.zip firefox-ha-boks-extension.xpi > checksums.txt
 
-          if curl -fSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" -o "$COSIGN_BIN"; then
-            chmod +x "$COSIGN_BIN"
-          else
-            if command -v docker >/dev/null 2>&1; then
-              docker run --rm --entrypoint cat "ghcr.io/sigstore/cosign/cosign:${COSIGN_VERSION}" /ko-app/cosign > "$COSIGN_BIN"
-              chmod +x "$COSIGN_BIN"
-            else
-              echo "ERROR: could not download cosign and docker not available for fallback. Exiting."; exit 2
-            fi
-          fi
-
-          echo "COSIGN_BIN=$COSIGN_BIN" >> "$GITHUB_ENV"
-        shell: bash
-
-      - name: Sign artifacts with cosign (non-interactive via Actions OIDC) and record provenance
-        if: success()
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          COSIGN_BIN="${COSIGN_BIN:-/usr/local/bin/cosign}"
-          mkdir -p provenance
-
-          ZIP_NAME="ha-boks-extension.zip"
-          FIREFOX_NAME="firefox-ha-boks-extension.xpi"
-
-          artifacts=(
-            "${ZIP_NAME}"
-            "${FIREFOX_NAME}"
-          )
-
-          # Build recommended regexps for certificate verification (used in CI verification output)
-          CERT_IDENTITY_REGEXP="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.*"
-          CERT_OIDC_ISSUER_REGEXP="https://token.actions.githubusercontent.com.*"
-
-          echo "Using certificate identity regexp: $CERT_IDENTITY_REGEXP"
-          echo "Using certificate oidc issuer regexp: $CERT_OIDC_ISSUER_REGEXP"
-
-          for f in "${artifacts[@]}"; do
-            if [ ! -f "$f" ]; then
-              echo "Warning: $f not found, skipping signing."
-              continue
-            fi
-
-            sig="${f}.sig"
-            cert="${f}.cert"
-            prov="provenance/${f}.verify.txt"
-
-            echo "Signing $f -> $sig (non-interactive; cosign will use Actions OIDC if available)"
-            "$COSIGN_BIN" sign-blob -y --oidc-provider github-actions --output-signature "$sig" --output-certificate "$cert" "$f"
-
-            echo "Verifying $f and saving output to $prov"
-            "$COSIGN_BIN" verify-blob --signature "$sig" --cert "$cert" --certificate-identity-regexp "$CERT_IDENTITY_REGEXP" --certificate-oidc-issuer-regexp "$CERT_OIDC_ISSUER_REGEXP" "$f" 2>&1 | tee "$prov"
-
-            echo "Signed $f -> $sig and $cert; verification written to $prov"
-          done
-        shell: bash
+      - name: Attest Build Provenance
+        id: attest
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-checksums: checksums.txt
 
       - name: List artifacts for debug
         run: |
@@ -146,11 +114,10 @@ jobs:
           ls -alh
           test -f ha-boks-extension.zip && unzip -l ha-boks-extension.zip || true
           test -f firefox-ha-boks-extension.xpi && unzip -l firefox-ha-boks-extension.xpi || true
-          echo "--- provenance files ---"
-          ls -alh provenance || true
+          test -f checksums.txt && cat checksums.txt || true
         shell: bash
 
-      - name: Upload Assets to Release (including signatures & provenance)
+      - name: Upload Assets to Release (including checksums)
         uses: actions/github-script@v7
         with:
           script: |
@@ -161,14 +128,8 @@ jobs:
 
             const files = [
               'ha-boks-extension.zip',
-              'ha-boks-extension.zip.sig',
-              'ha-boks-extension.zip.cert',
-              'provenance/ha-boks-extension.zip.verify.txt',
-
               'firefox-ha-boks-extension.xpi',
-              'firefox-ha-boks-extension.xpi.sig',
-              'firefox-ha-boks-extension.xpi.cert',
-              'provenance/firefox-ha-boks-extension.xpi.verify.txt'
+              'checksums.txt'
             ];
 
             for (const file of files) {
@@ -179,7 +140,12 @@ jobs:
                   repo,
                   release_id: releaseId,
                   name: file,
-                  data: fs.readFileSync(file)
+                  data: fs.readFileSync(file),
+                  headers: {
+                    'content-type': file.endsWith('.zip') ? 'application/zip' : 
+                                   file.endsWith('.xpi') ? 'application/x-xpinstall' : 'text/plain',
+                    'content-length': fs.statSync(file).size
+                  }
                 });
                 console.log(`Uploaded ${file}`);
               } else {
@@ -191,36 +157,35 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
-      - name: Append short verification note to release notes
+      - name: Append verification note to release notes
         uses: actions/github-script@v7
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          RUN_ID: ${{ github.run_id }}
         with:
           script: |
             const { owner, repo } = context.repo;
             const releaseId = context.payload.release.id;
-            const tag = process.env.RELEASE_TAG || context.payload.release.tag_name || '';
-            const base = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}`;
+            const { ATTESTATION_URL, RUN_ID, GITHUB_SERVER_URL, GITHUB_REPOSITORY } = process.env;
 
-            // Define regexps for cosign verification command example
-            const certRegexp = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.*`;
-            const issuerRegexp = "https://token.actions.githubusercontent.com.*";
-
-            console.log('Updating release notes with short verification info...');
-            const verificationBlock = [
-              '### Verification',
-              '```bash',
-              '# ZIP:',
-              `cosign verify-blob --signature ha-boks-extension.zip.sig --certificate-identity-regexp "${certRegexp}" --certificate-oidc-issuer-regexp "${issuerRegexp}" ${base}/ha-boks-extension.zip`,
-              '# Firefox XPI:',
-              `cosign verify-blob --signature firefox-ha-boks-extension.xpi.sig --certificate-identity-regexp "${certRegexp}" --certificate-oidc-issuer-regexp "${issuerRegexp}" ${base}/firefox-ha-boks-extension.xpi`,
-              '```',
-              'You can also inspect the attached provenance files (provenance/*.verify.txt) which contain the detailed verification output (claims, Rekor entry).',
-              '',
-              'Quick docs: https://github.com/sigstore/cosign'
-            ].join('\n');
+            console.log('Updating release notes with attestation info...');
+            const verificationBlock = `
+            ---
+            ### 🛡️ Security & Provenance
+            This release includes signed build provenance attestations.
+            - **Official Attestation**: [Verify on GitHub](${ATTESTATION_URL})
+            - **Manual Verification**:
+              \`\`\`bash
+              # Verify the artifacts using the checksums file
+              shasum -a 256 -c checksums.txt
+              # Verify the attestation via GitHub CLI
+              gh attestation verify ha-boks-extension.zip --repo ${owner}/${repo}
+              gh attestation verify firefox-ha-boks-extension.xpi --repo ${owner}/${repo}
+              \`\`\`
+            **Workflow Run**: [Execution #${RUN_ID}](${GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${RUN_ID})`;
 
             const current = context.payload.release.body || '';
             const newBody = current + '\n\n' + verificationBlock;

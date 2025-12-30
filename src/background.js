@@ -1,3 +1,6 @@
+import { HAWebSocket } from './ha-client.js';
+import { DEFAULT_HA_URL } from './const.js';
+
 // Initialize the context menu when the extension is installed
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
@@ -42,14 +45,15 @@ async function handleMenuClick(tab) {
 
         // 2. Get configuration from storage
         const config = await chrome.storage.sync.get(['haUrl', 'haToken']);
+        const haUrl = config.haUrl || DEFAULT_HA_URL;
 
-        if (!config.haUrl || !config.haToken) {
+        if (!haUrl || !config.haToken) {
             alertUser(tab.id, chrome.i18n.getMessage("errorConfig"));
             return;
         }
 
         // 3. Call Home Assistant
-        const code = await addParcelAndGetCode(config.haUrl, config.haToken, description);
+        const code = await addParcelAndGetCode(haUrl, config.haToken, description);
 
         // 4. Insert code into the field
         if (code) {
@@ -113,137 +117,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // --- WebSocket Client Class ---
-
-class HAWebSocket {
-    constructor(baseUrl, token) {
-        this.baseUrl = baseUrl.replace(/\/$/, "");
-        this.token = token;
-        this.socket = null;
-        this.messageId = 1;
-        this.pendingRequests = new Map();
-        this.isConnected = false;
-        this.isAuthenticated = false;
-    }
-
-    async connect() {
-        if (this.isConnected && this.isAuthenticated) return;
-
-        return new Promise((resolve, reject) => {
-            let wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/websocket";
-            console.log("Connecting to WebSocket:", wsUrl);
-
-            try {
-                this.socket = new WebSocket(wsUrl);
-            } catch (e) {
-                reject(new Error(`Failed to create WebSocket: ${e.message}`));
-                return;
-            }
-
-            this.socket.onopen = () => {
-                console.log("WebSocket connection opened");
-                this.isConnected = true;
-            };
-
-            this.socket.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-                    this.handleMessage(message, resolve, reject);
-                } catch (e) {
-                    console.error("Error processing WebSocket message:", e);
-                }
-            };
-
-            this.socket.onerror = (error) => {
-                console.error("WebSocket error:", error);
-                this.isConnected = false;
-                this.isAuthenticated = false;
-                reject(new Error("WebSocket connection error"));
-            };
-
-            this.socket.onclose = (event) => {
-                console.log("WebSocket connection closed", event.code, event.reason);
-                this.isConnected = false;
-                this.isAuthenticated = false;
-            };
-        });
-    }
-
-    handleMessage(message, connectResolve, connectReject) {
-        console.log("WS Message received:", message);
-
-        if (message.type === "auth_required") {
-            this.socket.send(JSON.stringify({
-                type: "auth",
-                access_token: this.token
-            }));
-        } else if (message.type === "auth_ok") {
-            console.log("Authentication successful");
-            this.isAuthenticated = true;
-            if (connectResolve) connectResolve();
-        } else if (message.type === "auth_invalid") {
-            console.error("Authentication failed:", message.message);
-            this.isAuthenticated = false;
-            if (connectReject) connectReject(new Error(`Authentication failed: ${message.message}`));
-        } else if (message.type === "result") {
-            const req = this.pendingRequests.get(message.id);
-            if (req) {
-                if (message.success) {
-                    req.resolve(message.result);
-                } else {
-                    req.reject(new Error(message.error ? message.error.message : "Unknown error"));
-                }
-                this.pendingRequests.delete(message.id);
-            }
-        }
-    }
-
-    async sendRequest(type, payload = {}) {
-        await this.connect();
-
-        return new Promise((resolve, reject) => {
-            const id = this.messageId++;
-            this.pendingRequests.set(id, { resolve, reject });
-
-            const message = {
-                id,
-                type,
-                ...payload
-            };
-
-            this.socket.send(JSON.stringify(message));
-        });
-    }
-
-    async callService(domain, service, serviceData, target = null, returnResponse = false) {
-        const payload = {
-            domain,
-            service,
-            service_data: serviceData
-        };
-        if (target) {
-            payload.target = target;
-        }
-        if (returnResponse) {
-            payload.return_response = true;
-        }
-        return this.sendRequest("call_service", payload);
-    }
-
-    close() {
-        if (this.socket) {
-            this.socket.close();
-        }
-    }
-}
+// (Moved to ha-client.js)
 
 // --- Handlers ---
 
 async function getHAConnection() {
     const config = await chrome.storage.sync.get(['haUrl', 'haToken']);
-    if (!config.haUrl || !config.haToken) {
+    const haUrl = config.haUrl || DEFAULT_HA_URL;
+    if (!haUrl || !config.haToken) {
         throw new Error("Configuration missing");
     }
-    return new HAWebSocket(config.haUrl, config.haToken);
+    return new HAWebSocket(haUrl, config.haToken);
 }
 
 /**
@@ -348,7 +232,7 @@ async function handleGetTodoEntities(haUrl, haToken) {
 
         if (!url || !token) {
             const config = await chrome.storage.sync.get(['haUrl', 'haToken']);
-            url = config.haUrl;
+            url = config.haUrl || DEFAULT_HA_URL;
             token = config.haToken;
         }
 
@@ -426,8 +310,19 @@ function insertCodeIntoActiveElement(codeToInsert) {
         const end = activeElement.selectionEnd;
         const text = activeElement.value;
 
+        // Check if we need a leading space
+        // Add space if:
+        // 1. Not at the start of the field
+        // 2. The character before cursor is not already a whitespace
+        let prefix = "";
+        if (start > 0 && !/\s/.test(text[start - 1])) {
+            prefix = " ";
+        }
+
+        const finalCode = prefix + codeToInsert;
+
         // Insert code at cursor position
-        activeElement.value = text.substring(0, start) + " " + codeToInsert + text.substring(end);
+        activeElement.value = text.substring(0, start) + finalCode + text.substring(end);
 
         // Dispatch input event for React/Angular/Vue
         activeElement.dispatchEvent(new Event('input', { bubbles: true }));

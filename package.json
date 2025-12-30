@@ -1,0 +1,27 @@
+{
+  "name": "ha-boks-webextension",
+  "version": "1.0.0",
+  "description": "ha-boks Web Extension",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "node build.js",
+    "watch": "node build.js --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thib3113/ha-boks-webextension.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/thib3113/ha-boks-webextension/issues"
+  },
+  "homepage": "https://github.com/thib3113/ha-boks-webextension#readme",
+  "devDependencies": {
+    "esbuild": "^0.27.2",
+    "fs-extra": "^11.3.3"
+  }
+}

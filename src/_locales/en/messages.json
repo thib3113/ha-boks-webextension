@@ -24,7 +24,7 @@
     "message": "Home Assistant Configuration"
   },
   "labelUrl": {
-    "message": "Home Assistant URL (e.g. http://homeassistant.local:8123)"
+    "message": "Home Assistant URL"
   },
   "labelToken": {
     "message": "Long-Lived Access Token"
@@ -34,6 +34,20 @@
   },
   "btnSave": {
     "message": "Save"
+  },
+  "btnTestConnection": {
+    "message": "Test Connection"
+  },
+  "connectionSuccess": {
+    "message": "Connection successful! (Authenticated)"
+  },
+  "connectionFailed": {
+    "message": "Connection failed: $error$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
   },
   "msgSaved": {
     "message": "Configuration saved!"
@@ -101,5 +115,26 @@
   },
   "copy_code": {
     "message": "Copy code"
+  },
+  "currentParcelsTitle": {
+    "message": "Current Parcels"
+  },
+  "loadingParcels": {
+    "message": "Loading parcels..."
+  },
+  "noParcelsFound": {
+    "message": "No parcels found."
+  },
+  "errorLoadingParcels": {
+    "message": "Error loading parcels."
+  },
+  "editTaskTitle": {
+    "message": "Edit"
+  },
+  "editTaskPrompt": {
+    "message": "Edit task:"
+  },
+  "updateFailedAlert": {
+    "message": "Failed to update item"
   }
 }
