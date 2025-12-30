@@ -1,6 +1,6 @@
 {
   "name": "ha-boks-webextension",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ha-boks Web Extension",
   "main": "index.js",
   "scripts": {
