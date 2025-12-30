@@ -1,9 +1,9 @@
 name: Build, Attest and Publish Extension
 
-# Trigger on published releases
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 # Grant permissions for GitHub Attestations
 permissions:
