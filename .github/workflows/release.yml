@@ -117,61 +117,89 @@ jobs:
           test -f checksums.txt && cat checksums.txt || true
         shell: bash
 
-      - name: Upload Assets to Release (including checksums)
+      - name: Create Release and Upload Assets
         uses: actions/github-script@v7
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
         with:
           script: |
             const fs = require('fs');
-            const { repo, owner } = context.repo;
-            const releaseId = context.payload.release.id;
-            console.log(`Uploading assets to release ID: ${releaseId}`);
+            const { 
+              TAG_NAME, ATTESTATION_URL, REPO_OWNER, 
+              REPO_NAME, RUN_ID, SERVER_URL 
+            } = process.env;
 
+            console.log(`Processing release for tag: ${TAG_NAME}`);
+
+            // 1. Get or Create the Release
+            let release;
+            try {
+              console.log('Creating release...');
+              const r = await github.rest.repos.createRelease({
+                owner: REPO_OWNER,
+                repo: REPO_NAME,
+                tag_name: TAG_NAME,
+                name: `Release ${TAG_NAME}`,
+                draft: false,
+                prerelease: false,
+                generate_release_notes: true
+              });
+              release = r.data;
+              console.log(`Created release ID: ${release.id}`);
+            } catch (e) {
+              // If release already exists (e.g. re-run), fetch it
+              if (e.status === 422) {
+                console.log('Release already exists, fetching it...');
+                const r = await github.rest.repos.getReleaseByTag({ owner: REPO_OWNER, repo: REPO_NAME, tag: TAG_NAME });
+                release = r.data;
+                console.log(`Found existing release ID: ${release.id}`);
+              } else {
+                throw e;
+              }
+            }
+
+            const releaseId = release.id;
+
+            // 2. Upload Assets
             const files = [
               'ha-boks-extension.zip',
               'firefox-ha-boks-extension.xpi',
               'checksums.txt'
             ];
 
-            for (const file of files) {
-              if (fs.existsSync(file)) {
-                console.log(`Uploading ${file}...`);
+            for (const fileName of files) {
+              if (fs.existsSync(fileName)) {
+                console.log(`Handling asset: ${fileName}`);
+                
+                // Delete existing asset if it exists (allows reruns)
+                const existingAsset = release.assets.find(a => a.name === fileName);
+                if (existingAsset) {
+                    console.log(`Deleting existing asset ${fileName} (ID: ${existingAsset.id})...`);
+                    await github.rest.repos.deleteReleaseAsset({ owner: REPO_OWNER, repo: REPO_NAME, asset_id: existingAsset.id });
+                }
+
+                console.log(`Uploading ${fileName}...`);
                 await github.rest.repos.uploadReleaseAsset({
-                  owner,
-                  repo,
+                  owner: REPO_OWNER,
+                  repo: REPO_NAME,
                   release_id: releaseId,
-                  name: file,
-                  data: fs.readFileSync(file),
+                  name: fileName,
+                  data: fs.readFileSync(fileName),
                   headers: {
-                    'content-type': file.endsWith('.zip') ? 'application/zip' : 
-                                   file.endsWith('.xpi') ? 'application/x-xpinstall' : 'text/plain',
-                    'content-length': fs.statSync(file).size
+                    'content-type': fileName.endsWith('.zip') ? 'application/zip' : 
+                                   fileName.endsWith('.xpi') ? 'application/x-xpinstall' : 'text/plain',
+                    'content-length': fs.statSync(fileName).size
                   }
                 });
-                console.log(`Uploaded ${file}`);
-              } else {
-                console.log(`File ${file} skipped (not found).`);
               }
             }
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
 
-      - name: Append verification note to release notes
-        uses: actions/github-script@v7
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
-          RUN_ID: ${{ github.run_id }}
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const releaseId = context.payload.release.id;
-            const { ATTESTATION_URL, RUN_ID, GITHUB_SERVER_URL, GITHUB_REPOSITORY } = process.env;
-
-            console.log('Updating release notes with attestation info...');
+            // 3. Update body with Attestation info
             const verificationBlock = `
             ---
             ### 🛡️ Security & Provenance
@@ -182,19 +210,20 @@ jobs:
               # Verify the artifacts using the checksums file
               shasum -a 256 -c checksums.txt
               # Verify the attestation via GitHub CLI
-              gh attestation verify ha-boks-extension.zip --repo ${owner}/${repo}
-              gh attestation verify firefox-ha-boks-extension.xpi --repo ${owner}/${repo}
+              gh attestation verify ha-boks-extension.zip --repo ${REPO_OWNER}/${REPO_NAME}
+              gh attestation verify firefox-ha-boks-extension.xpi --repo ${REPO_OWNER}/${REPO_NAME}
               \`\`\`
-            **Workflow Run**: [Execution #${RUN_ID}](${GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${RUN_ID})`;
+            **Workflow Run**: [Execution #${RUN_ID}](${SERVER_URL}/${REPO_OWNER}/${REPO_NAME}/actions/runs/${RUN_ID})`;
 
-            const current = context.payload.release.body || '';
-            const newBody = current + '\n\n' + verificationBlock;
-
-            await github.rest.repos.updateRelease({
-              owner,
-              repo,
-              release_id: releaseId,
-              body: newBody
-            });
-
-            console.log('Release notes updated.');
+            const currentBody = release.body || '';
+            if (!currentBody.includes("Security & Provenance")) {
+                console.log('Updating release body with provenance info...');
+                await github.rest.repos.updateRelease({
+                  owner: REPO_OWNER,
+                  repo: REPO_NAME,
+                  release_id: releaseId,
+                  body: currentBody + '\n\n' + verificationBlock
+                });
+            } else {
+                console.log('Release body already contains provenance info, skipping update.');
+            }
