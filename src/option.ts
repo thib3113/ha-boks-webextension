@@ -8,7 +8,7 @@ function localizeHtmlPage() {
     for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
         const msgKey = obj.getAttribute('data-i18n');
-        const msg = chrome.i18n.getMessage(msgKey);
+        const msg = chrome.i18n.getMessage(msgKey!);
         if (msg) {
             obj.textContent = msg;
         }
@@ -18,7 +18,7 @@ function localizeHtmlPage() {
     for (let i = 0; i < placeholders.length; i++) {
         const obj = placeholders[i];
         const msgKey = obj.getAttribute('data-i18n-placeholder');
-        const msg = chrome.i18n.getMessage(msgKey);
+        const msg = chrome.i18n.getMessage(msgKey!);
         if (msg) {
             obj.setAttribute('placeholder', msg);
         }
@@ -26,9 +26,11 @@ function localizeHtmlPage() {
 }
 
 // Fetch todo entities from Home Assistant
-async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
-    const entitySelect = document.getElementById('selectedTodoEntityId');
+async function fetchTodoEntities(haUrl: string, haToken: string, selectedId: string | null = null) {
+    const entitySelect = document.getElementById('selectedTodoEntityId') as HTMLSelectElement;
     const entityError = document.getElementById('entityError');
+
+    if (!entitySelect || !entityError) return [];
 
     // Clear previous error
     entityError.textContent = '';
@@ -49,7 +51,7 @@ async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
         const todoEntities = entities; // Already filtered in background
 
         // Filter for todo entities with boks in entity_id or friendly_name
-        const todoEntitiesBoks = todoEntities.filter(entity => {
+        const todoEntitiesBoks = todoEntities.filter((entity: any) => {
             // Check if entity_id starts with 'boks' (case insensitive)
             return entity.entity_id.toLowerCase().startsWith('todo.boks');
         });
@@ -67,7 +69,7 @@ async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
         entitySelect.appendChild(defaultOption);
 
         // Add entities to dropdown
-        filteredEntities.forEach(entity => {
+        filteredEntities.forEach((entity: any) => {
             const option = document.createElement('option');
             option.value = entity.entity_id;
             option.textContent = entity.attributes.friendly_name || entity.entity_id;
@@ -89,7 +91,7 @@ async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
         }
 
         return filteredEntities;
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error fetching entities:', error);
         entityError.textContent = `${chrome.i18n.getMessage('errorFetchingEntities') || 'Error fetching entities'}: ${error.message}`;
         entitySelect.disabled = true;
@@ -99,36 +101,41 @@ async function fetchTodoEntities(haUrl, haToken, selectedId = null) {
 
 // 2. Save Logic
 const saveOptions = () => {
-    let haUrl = document.getElementById('haUrl').value.trim();
-    const haToken = document.getElementById('haToken').value.trim();
-    const selectedTodoEntityId = document.getElementById('selectedTodoEntityId').value;
+    let haUrlInput = document.getElementById('haUrl') as HTMLInputElement;
+    let haUrl = haUrlInput.value.trim();
+    const haToken = (document.getElementById('haToken') as HTMLInputElement).value.trim();
+    const selectedTodoEntityId = (document.getElementById('selectedTodoEntityId') as HTMLSelectElement).value;
 
     if (!haUrl) {
         haUrl = DEFAULT_HA_URL;
-        document.getElementById('haUrl').value = haUrl;
+        haUrlInput.value = haUrl;
     }
 
     chrome.storage.sync.set(
         { haUrl: haUrl, haToken: haToken, selectedTodoEntityId: selectedTodoEntityId },
         () => {
             const status = document.getElementById('status');
-            status.textContent = chrome.i18n.getMessage("msgSaved");
-            status.style.color = "green";
-            setTimeout(() => {
-                status.textContent = '';
-            }, 2000);
+            if (status) {
+                status.textContent = chrome.i18n.getMessage("msgSaved");
+                status.style.color = "green";
+                setTimeout(() => {
+                    status.textContent = '';
+                }, 2000);
+            }
         }
     );
 };
 
 // Global variable to track the active WebSocket instance
-let currentTestHA = null;
+let currentTestHA: HAWebSocket | null = null;
 
 // Test Connection Logic
 const testConnection = async () => {
-    let haUrl = document.getElementById('haUrl').value.trim();
-    const haToken = document.getElementById('haToken').value.trim();
+    let haUrl = (document.getElementById('haUrl') as HTMLInputElement).value.trim();
+    const haToken = (document.getElementById('haToken') as HTMLInputElement).value.trim();
     const status = document.getElementById('status');
+    
+    if (!status) return;
 
     if (!haUrl) haUrl = DEFAULT_HA_URL;
 
@@ -169,7 +176,7 @@ const testConnection = async () => {
         } else {
              throw new Error("Not authenticated");
         }
-    } catch (error) {
+    } catch (error: any) {
         // 4. Check if we are still the active instance
         if (ha !== currentTestHA) {
             console.log("Ignoring error from cancelled connection");
@@ -196,10 +203,10 @@ const restoreOptions = () => {
     chrome.storage.sync.get(
         { haUrl: DEFAULT_HA_URL, haToken: '', selectedTodoEntityId: '' },
         (items) => {
-            document.getElementById('haUrl').value = items.haUrl;
-            document.getElementById('haToken').value = items.haToken;
+            (document.getElementById('haUrl') as HTMLInputElement).value = items.haUrl;
+            (document.getElementById('haToken') as HTMLInputElement).value = items.haToken;
             // Set value here too, in case fetch fails or takes time (it will show empty if not in list yet, but good practice)
-            document.getElementById('selectedTodoEntityId').value = items.selectedTodoEntityId;
+            (document.getElementById('selectedTodoEntityId') as HTMLSelectElement).value = items.selectedTodoEntityId;
 
             // If we have URL and token, fetch entities
             if (items.haUrl && items.haToken) {
@@ -211,9 +218,9 @@ const restoreOptions = () => {
 };
 
 // Debounce function to limit API calls
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
+function debounce(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout;
+    return function executedFunction(...args: any[]) {
         const later = () => {
             clearTimeout(timeout);
             func(...args);
@@ -225,9 +232,11 @@ function debounce(func, wait) {
 
 // Event listener for when HA URL or token changes
 function setupEntityFetching() {
-    const haUrlInput = document.getElementById('haUrl');
-    const haTokenInput = document.getElementById('haToken');
-    const entitySelect = document.getElementById('selectedTodoEntityId');
+    const haUrlInput = document.getElementById('haUrl') as HTMLInputElement;
+    const haTokenInput = document.getElementById('haToken') as HTMLInputElement;
+    const entitySelect = document.getElementById('selectedTodoEntityId') as HTMLSelectElement;
+
+    if (!haUrlInput || !haTokenInput || !entitySelect) return;
 
     // Function to handle input changes with debounce
     const handleInputChange = debounce(() => {
@@ -269,11 +278,11 @@ document.addEventListener('DOMContentLoaded', () => {
     localizeHtmlPage();
     restoreOptions();
     setupEntityFetching();
-    document.getElementById('save').addEventListener('click', (e) => {
+    document.getElementById('save')?.addEventListener('click', (e) => {
         e.preventDefault();
         saveOptions();
     });
-    document.getElementById('testConnection').addEventListener('click', (e) => {
+    document.getElementById('testConnection')?.addEventListener('click', (e) => {
         e.preventDefault();
         testConnection();
     });

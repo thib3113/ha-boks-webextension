@@ -2,8 +2,32 @@
  * Home Assistant WebSocket Client
  * Handles connection, authentication, and service calls.
  */
+
+interface HAMessage {
+    id?: number;
+    type: string;
+    success?: boolean;
+    result?: any;
+    error?: { message: string };
+    message?: string;
+    [key: string]: any;
+}
+
+interface PendingRequest {
+    resolve: (value: any) => void;
+    reject: (reason?: any) => void;
+}
+
 export class HAWebSocket {
-    constructor(baseUrl, token) {
+    private baseUrl: string;
+    private token: string;
+    private socket: WebSocket | null;
+    private messageId: number;
+    private pendingRequests: Map<number, PendingRequest>;
+    public isConnected: boolean;
+    public isAuthenticated: boolean;
+
+    constructor(baseUrl: string, token: string) {
         this.baseUrl = baseUrl.replace(/\/$/, "");
         this.token = token;
         this.socket = null;
@@ -13,7 +37,7 @@ export class HAWebSocket {
         this.isAuthenticated = false;
     }
 
-    async connect() {
+    async connect(): Promise<void> {
         if (this.isConnected && this.isAuthenticated) return;
 
         return new Promise((resolve, reject) => {
@@ -22,7 +46,7 @@ export class HAWebSocket {
 
             try {
                 this.socket = new WebSocket(wsUrl);
-            } catch (e) {
+            } catch (e: any) {
                 reject(new Error(`Failed to create WebSocket: ${e.message}`));
                 return;
             }
@@ -56,11 +80,11 @@ export class HAWebSocket {
         });
     }
 
-    handleMessage(message, connectResolve, connectReject) {
+    private handleMessage(message: HAMessage, connectResolve?: () => void, connectReject?: (reason?: any) => void) {
         // console.log("WS Message received:", message); // Verbose logging
 
         if (message.type === "auth_required") {
-            this.socket.send(JSON.stringify({
+            this.socket?.send(JSON.stringify({
                 type: "auth",
                 access_token: this.token
             }));
@@ -73,19 +97,19 @@ export class HAWebSocket {
             this.isAuthenticated = false;
             if (connectReject) connectReject(new Error(`Authentication failed: ${message.message}`));
         } else if (message.type === "result") {
-            const req = this.pendingRequests.get(message.id);
+            const req = this.pendingRequests.get(message.id!);
             if (req) {
                 if (message.success) {
                     req.resolve(message.result);
                 } else {
                     req.reject(new Error(message.error ? message.error.message : "Unknown error"));
                 }
-                this.pendingRequests.delete(message.id);
+                this.pendingRequests.delete(message.id!);
             }
         }
     }
 
-    async sendRequest(type, payload = {}) {
+    async sendRequest(type: string, payload: any = {}): Promise<any> {
         await this.connect();
 
         return new Promise((resolve, reject) => {
@@ -98,12 +122,12 @@ export class HAWebSocket {
                 ...payload
             };
 
-            this.socket.send(JSON.stringify(message));
+            this.socket?.send(JSON.stringify(message));
         });
     }
 
-    async callService(domain, service, serviceData, target = null, returnResponse = false) {
-        const payload = {
+    async callService(domain: string, service: string, serviceData: any, target: any = null, returnResponse: boolean = false): Promise<any> {
+        const payload: any = {
             domain,
             service,
             service_data: serviceData

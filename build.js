@@ -1,16 +1,19 @@
 const esbuild = require('esbuild');
-const fs = require('fs-extra');
+const fs = require('fs/promises'); // Use native promises
 const path = require('path');
 
 const isWatch = process.argv.includes('--watch');
 
 async function build() {
     // 1. Clean dist directory
-    await fs.emptyDir('dist');
+    // fs-extra emptyDir -> native approach
+    await fs.rm('dist', { recursive: true, force: true });
+    await fs.mkdir('dist', { recursive: true });
+    await fs.mkdir('dist/extension', { recursive: true });
+    await fs.mkdir('dist/userscript', { recursive: true });
 
-    // 2. Copy static assets
+    // 2. Copy static assets to dist/extension
     const assets = [
-        // 'manifest.json', // Handled manually below to inject version
         'popup.html',
         'options.html',
         'icons',
@@ -18,75 +21,196 @@ async function build() {
     ];
 
     for (const asset of assets) {
-        if (await fs.pathExists(path.join('src', asset))) {
-            await fs.copy(path.join('src', asset), path.join('dist', asset));
+        const srcPath = path.join('src', asset);
+        const destPath = path.join('dist/extension', asset);
+        try {
+            await fs.cp(srcPath, destPath, { recursive: true });
+        } catch (e) {
+            // Ignore missing
         }
     }
 
-    // 2b. Process Manifest (Inject Version)
-    const packageJson = await fs.readJson('package.json');
-    const manifest = await fs.readJson('src/manifest.json');
-    
+    // 2b. Process Manifest
+    const packageJson = JSON.parse(await fs.readFile('package.json', 'utf8'));
+    const manifest = JSON.parse(await fs.readFile('src/manifest.json', 'utf8'));
+
     manifest.version = packageJson.version;
     console.log(`ℹ️  Injecting version ${manifest.version} into manifest`);
 
-    await fs.writeJson('dist/manifest.json', manifest, { spaces: 2 });
+    await fs.writeFile('dist/extension/manifest.json', JSON.stringify(manifest, null, 2));
 
     console.log('✅ Assets copied & Manifest generated');
 
-    // 3. Bundle JS
+    const buildMetadata = [
+        `Version: ${packageJson.version}`,
+        `Git Tag: ${process.env.GITHUB_REF_NAME || 'local'}`,
+        `Run ID: ${process.env.GITHUB_RUN_ID || 'local'}`,
+        `Repository: ${process.env.GITHUB_REPOSITORY || 'thib3113/ha-boks-webextension'}`
+    ];
+
+    if (process.env.GITHUB_RUN_ID) {
+        buildMetadata.push(`Build URL: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`);
+        if (process.env.GITHUB_REF_NAME && process.env.GITHUB_REF_NAME.startsWith('v')) {
+            buildMetadata.push(`Release URL: ${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/tag/${process.env.GITHUB_REF_NAME}`);
+        }
+    }
+
+    const githubBanner = `/**
+ * Boks Web Extension
+ * 
+ * This extension is built autonomously via GitHub Actions to ensure build integrity and transparency.
+ * The source code for this specific version can be reviewed at:
+ * ${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY || 'thib3113/ha-boks-webextension'}/tree/${process.env.GITHUB_REF_NAME || 'main'}
+ * 
+ * To verify the provenance and integrity of this build, an official GitHub Attestation 
+ * and a checksums.txt file are provided in the associated release. This allows validation 
+ * that the minified code corresponds exactly to the automated build from the source.
+ * 
+ * Permissions details:
+ * - contextMenus: Add "Generate code" action to input fields.
+ * - scripting & activeTab: Inject generated codes into the active page.
+ * - storage: Securely store Home Assistant connection settings.
+ * 
+ * Build Metadata:
+ * ${buildMetadata.map(line => ` * - ${line}`).join('\n')}
+ */`;
+
+    // 3. Bundle JS for Web Extension
     const entryPoints = [
-        'src/background.js',
-        'src/popup.js',
-        'src/option.js' // Note: option.js, not options.js based on your file structure
+        'src/background.ts',
+        'src/popup.ts',
+        'src/option.ts'
     ];
 
     const ctx = await esbuild.context({
         entryPoints: entryPoints,
         bundle: true,
-        outdir: 'dist',
+        outdir: 'dist/extension',
         sourcemap: process.env.NODE_ENV !== 'production',
-        minify: process.env.NODE_ENV === 'production',
+        minify: true,
         target: ['chrome100', 'firefox100'],
-        format: 'esm', // Use ESM for modern extensions
+        format: 'esm',
+        logLevel: 'info',
+        banner: { js: githubBanner },
+    });
+
+    // 4. Bundle Userscript
+    const localesDir = 'src/_locales';
+    const availableLocales = await fs.readdir(localesDir);
+    const descriptionHeaders = [];
+    descriptionHeaders.push(`// @description  ${packageJson.description}`);
+
+    const allMessages = {};
+
+    for (const lang of availableLocales) {
+        const msgPath = path.join(localesDir, lang, 'messages.json');
+        try {
+            const msgsContent = await fs.readFile(msgPath, 'utf8');
+            const msgs = JSON.parse(msgsContent);
+            if (msgs.extDescription && msgs.extDescription.message) {
+                descriptionHeaders.push(`// @description:${lang} ${msgs.extDescription.message}`);
+            }
+
+            // Collect messages for injection
+            allMessages[lang] = {};
+            for (const key in msgs) {
+                allMessages[lang][key] = msgs[key].message;
+            }
+        } catch (e) {
+            // Ignore
+        }
+    }
+
+    // Filter messages based on usage in userscript.ts
+    const userscriptSource = await fs.readFile('src/userscript.ts', 'utf8');
+    const usedKeys = new Set();
+    const regex = /\bt\(['"]([^'"]+)['"]\)/g;
+    let match;
+    while ((match = regex.exec(userscriptSource)) !== null) {
+        usedKeys.add(match[1]);
+    }
+
+    const injectedMessages = {};
+    for (const lang in allMessages) {
+        injectedMessages[lang] = {};
+        for (const key of usedKeys) {
+            if (allMessages[lang][key]) {
+                injectedMessages[lang][key] = allMessages[lang][key];
+            }
+        }
+    }
+
+    console.log(`ℹ️  Injected ${usedKeys.size} translation keys for ${Object.keys(injectedMessages).length} languages`);
+
+    const userscriptBanner = `// ==UserScript==
+// @name         Boks Helper
+// @namespace    https://github.com/thib3113/ha-boks-webextension
+// @version      ${packageJson.version}
+${descriptionHeaders.join('\n')}
+// @author       Thib3113
+// @match        *://*/*
+// @icon         https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-48.png
+// @icon64       https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-128.png
+// @homepageURL  https://github.com/thib3113/ha-boks-webextension
+// @supportURL   https://github.com/thib3113/ha-boks-webextension/issues?q=is%3Aissue+label%3Auserscript
+// @updateURL    https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js
+// @downloadURL    https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_notification
+// @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
+// ==/UserScript==
+//
+// Build Metadata:
+// Version:      ${packageJson.version}
+// Git Tag:      ${process.env.GITHUB_REF_NAME || 'local'}
+// Run ID:       ${process.env.GITHUB_RUN_ID || 'local'}
+// Build URL:    ${process.env.GITHUB_RUN_ID ? process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/actions/runs/' + process.env.GITHUB_RUN_ID : 'local'}
+${(process.env.GITHUB_RUN_ID && process.env.GITHUB_REF_NAME && process.env.GITHUB_REF_NAME.startsWith('v')) ? '// Release URL:  ' + process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY + '/releases/tag/' + process.env.GITHUB_REF_NAME : ''}
+`;
+
+    const ctxUserscript = await esbuild.context({
+        entryPoints: ['src/userscript.ts'],
+        bundle: true,
+        outfile: 'dist/userscript/boks.user.js',
+        sourcemap: false,
+        minify: false,
+        target: ['es2020'],
+        format: 'iife',
+        banner: {
+            js: `${userscriptBanner}\nconst __MESSAGES__ = ${JSON.stringify(injectedMessages)};`
+        },
         logLevel: 'info',
     });
 
+
     if (isWatch) {
         await ctx.watch();
+        await ctxUserscript.watch();
         console.log('👀 Watching JS for changes...');
 
-        // Simple watcher for static assets
-        const assetsToWatch = [
-            'src/manifest.json',
-            'src/popup.html',
-            'src/options.html',
-            'src/icons',
-            'src/_locales'
-        ];
-
-        // Helper to copy assets (reused logic)
         const copyAssets = async () => {
              console.log('📂 Copying assets...');
              for (const asset of assets) {
-                if (await fs.pathExists(path.join('src', asset))) {
-                    await fs.copy(path.join('src', asset), path.join('dist', asset));
-                }
+                const srcPath = path.join('src', asset);
+                const destPath = path.join('dist/extension', asset);
+                try {
+                    await fs.cp(srcPath, destPath, { recursive: true });
+                } catch(e) {}
             }
-            // Re-process manifest
-            const pkg = await fs.readJson('package.json');
-            const man = await fs.readJson('src/manifest.json');
+            const pkg = JSON.parse(await fs.readFile('package.json', 'utf8'));
+            const man = JSON.parse(await fs.readFile('src/manifest.json', 'utf8'));
             man.version = pkg.version;
-            await fs.writeJson('dist/manifest.json', man, { spaces: 2 });
+            await fs.writeFile('dist/extension/manifest.json', JSON.stringify(man, null, 2));
             console.log('📄 Manifest updated');
         };
 
         const watchDir = 'src';
         fs.watch(watchDir, { recursive: true }, async (eventType, filename) => {
             if (filename) {
-                // Check if the changed file is an asset (not a JS file handled by esbuild)
-                // This is a naive check, but sufficient for this project structure
-                if (!filename.endsWith('.js')) {
+                if (!filename.endsWith('.js') && !filename.endsWith('.ts')) {
                      console.log(`Resource changed: ${filename}`);
                      await copyAssets();
                 }
@@ -96,7 +220,9 @@ async function build() {
 
     } else {
         await ctx.rebuild();
+        await ctxUserscript.rebuild();
         await ctx.dispose();
+        await ctxUserscript.dispose();
         console.log('⚡ Build complete');
     }
 }

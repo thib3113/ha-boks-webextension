@@ -5,7 +5,7 @@ function localizeHtmlPage() {
     for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
         const msgKey = obj.getAttribute('data-i18n');
-        const msg = chrome.i18n.getMessage(msgKey);
+        const msg = chrome.i18n.getMessage(msgKey!);
         if (msg) {
             obj.textContent = msg;
         }
@@ -15,7 +15,7 @@ function localizeHtmlPage() {
     for (let i = 0; i < placeholders.length; i++) {
         const obj = placeholders[i];
         const msgKey = obj.getAttribute('data-i18n-placeholder');
-        const msg = chrome.i18n.getMessage(msgKey);
+        const msg = chrome.i18n.getMessage(msgKey!);
         if (msg) {
             obj.setAttribute('placeholder', msg);
         }
@@ -23,8 +23,10 @@ function localizeHtmlPage() {
 }
 
 // 2. Show message function
-function showMessage(text, isSuccess) {
+function showMessage(text: string, isSuccess: boolean) {
     const messageElement = document.getElementById('message');
+    if (!messageElement) return;
+
     messageElement.textContent = text;
     messageElement.className = isSuccess ? 'success' : 'error';
     messageElement.style.display = 'block';
@@ -40,6 +42,8 @@ async function fetchAndDisplayTodoItems() {
     const loadingElement = document.getElementById('loadingTodoList');
     const todoListElement = document.getElementById('todoList');
     const noItemsElement = document.getElementById('noTodoItems');
+
+    if (!loadingElement || !todoListElement || !noItemsElement) return;
 
     try {
         // Show loading state only if list is empty
@@ -80,13 +84,22 @@ async function fetchAndDisplayTodoItems() {
     }
 }
 
+interface TodoItem {
+    uid: string;
+    summary: string;
+    status: 'completed' | 'needs_action';
+    [key: string]: any;
+}
+
 // 4. Display todo items in the list
-function displayTodoItems(items) {
+function displayTodoItems(items: any) {
     const todoListElement = document.getElementById('todoList');
     const noItemsElement = document.getElementById('noTodoItems');
 
+    if (!todoListElement || !noItemsElement) return;
+
     // Handle different response structures (WebSocket vs REST)
-    let todoItems = [];
+    let todoItems: TodoItem[] = [];
     if (items && items.items && Array.isArray(items.items)) {
         // WebSocket response structure: { items: [...] }
         todoItems = items.items;
@@ -159,7 +172,7 @@ function displayTodoItems(items) {
 
             // Extract code
             const codeMatch = item.summary.match(/^\s*([0-9A-B]{6})(?:[\W_]+)?(.*)/i);
-            let code = null;
+            let code: string | null = null;
             let description = item.summary;
 
             if (codeMatch) {
@@ -189,7 +202,7 @@ function displayTodoItems(items) {
                 copyBtn.innerHTML = '📋'; // Simple icon
                 copyBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(code).then(() => {
+                    navigator.clipboard.writeText(code!).then(() => {
                         const originalText = copyBtn.innerHTML;
                         copyBtn.innerHTML = '✅';
                         setTimeout(() => copyBtn.innerHTML = originalText, 1000);
@@ -252,8 +265,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Apply localization
     localizeHtmlPage();
 
-    const addButton = document.getElementById('addParcel');
-    const descriptionInput = document.getElementById('description');
+    const addButton = document.getElementById('addParcel') as HTMLButtonElement;
+    const descriptionInput = document.getElementById('description') as HTMLInputElement;
     const configRequiredMessage = document.getElementById('configRequiredMessage');
     const openOptionsButton = document.getElementById('openOptions');
 

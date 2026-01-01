@@ -27,6 +27,7 @@ jobs:
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6
         with:
           node-version: 'lts/*'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -60,12 +61,11 @@ jobs:
           rm -rf build firefox_dist chrome_build
           mkdir -p build chrome_build firefox_dist
 
-          # Copy built extension from dist/ to build dirs
-          # Note: The build script (npm run build) already puts everything in dist/
-          rsync -a --delete dist/ chrome_build/
-          rsync -a --delete dist/ firefox_dist/
+          # Copy built extension from dist/extension/ to build dirs
+          rsync -a --delete dist/extension/ chrome_build/
+          rsync -a --delete dist/extension/ firefox_dist/
 
-          echo "Prepared chrome_build/ and firefox_dist/ from dist/"
+          echo "Prepared chrome_build/ and firefox_dist/ from dist/extension/"
         shell: bash
 
       - name: Create Firefox XPI
@@ -99,8 +99,15 @@ jobs:
           fi
         shell: bash
 
+      - name: Prepare Userscript
+        run: cp dist/userscript/boks.user.js .
+
       - name: Generate Checksums
-        run: shasum -a 256 ha-boks-extension.zip firefox-ha-boks-extension.xpi > checksums.txt
+        run: |
+          shasum -a 256 ha-boks-extension.zip firefox-ha-boks-extension.xpi boks.user.js > checksums.txt
+          find dist/extension -type f -exec shasum -a 256 {} + >> checksums.txt
+        shell: bash
+
 
       - name: Attest Build Provenance
         id: attest
@@ -114,6 +121,7 @@ jobs:
           ls -alh
           test -f ha-boks-extension.zip && unzip -l ha-boks-extension.zip || true
           test -f firefox-ha-boks-extension.xpi && unzip -l firefox-ha-boks-extension.xpi || true
+          test -f boks.user.js && head -n 5 boks.user.js || true
           test -f checksums.txt && cat checksums.txt || true
         shell: bash
 
@@ -169,6 +177,7 @@ jobs:
             const files = [
               'ha-boks-extension.zip',
               'firefox-ha-boks-extension.xpi',
+              'boks.user.js',
               'checksums.txt'
             ];
 
@@ -212,6 +221,7 @@ jobs:
               # Verify the attestation via GitHub CLI
               gh attestation verify ha-boks-extension.zip --repo ${REPO_OWNER}/${REPO_NAME}
               gh attestation verify firefox-ha-boks-extension.xpi --repo ${REPO_OWNER}/${REPO_NAME}
+              gh attestation verify boks.user.js --repo ${REPO_OWNER}/${REPO_NAME}
               \`\`\`
             **Workflow Run**: [Execution #${RUN_ID}](${SERVER_URL}/${REPO_OWNER}/${REPO_NAME}/actions/runs/${RUN_ID})`;
 
