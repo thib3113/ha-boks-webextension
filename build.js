@@ -1,12 +1,11 @@
-const esbuild = require('esbuild');
-const fs = require('fs/promises'); // Use native promises
-const path = require('path');
+import * as esbuild from 'esbuild';
+import fs from 'fs/promises';
+import path from 'path';
 
 const isWatch = process.argv.includes('--watch');
 
 async function build() {
     // 1. Clean dist directory
-    // fs-extra emptyDir -> native approach
     await fs.rm('dist', { recursive: true, force: true });
     await fs.mkdir('dist', { recursive: true });
     await fs.mkdir('dist/extension', { recursive: true });
@@ -25,7 +24,7 @@ async function build() {
         const destPath = path.join('dist/extension', asset);
         try {
             await fs.cp(srcPath, destPath, { recursive: true });
-        } catch (e) {
+        } catch {
             // Ignore missing
         }
     }
@@ -34,8 +33,9 @@ async function build() {
     const packageJson = JSON.parse(await fs.readFile('package.json', 'utf8'));
     const manifest = JSON.parse(await fs.readFile('src/manifest.json', 'utf8'));
 
-    manifest.version = packageJson.version;
-    console.log(`ℹ️  Injecting version ${manifest.version} into manifest`);
+    // Strip pre-release suffix for manifest (e.g. 1.2.0-pre3 -> 1.2.0)
+    manifest.version = packageJson.version.split('-')[0];
+    console.log(`ℹ️  Injecting version ${manifest.version} into manifest (original: ${packageJson.version})`);
 
     await fs.writeFile('dist/extension/manifest.json', JSON.stringify(manifest, null, 2));
 
@@ -71,8 +71,13 @@ async function build() {
  * - scripting & activeTab: Inject generated codes into the active page.
  * - storage: Securely store Home Assistant connection settings.
  * 
+ * Privacy Policy:
+ * - This extension operates locally and communicates directly with your Home Assistant instance.
+ * - No data is sent to third-party servers.
+ * - Credentials are stored securely in your browser's local storage.
+ * 
  * Build Metadata:
- * ${buildMetadata.map(line => ` * - ${line}`).join('\n')}
+${buildMetadata.map(line => ` * - ${line}`).join('\n')}
  */`;
 
     // 3. Bundle JS for Web Extension
@@ -98,7 +103,20 @@ async function build() {
     const localesDir = 'src/_locales';
     const availableLocales = await fs.readdir(localesDir);
     const descriptionHeaders = [];
-    descriptionHeaders.push(`// @description  ${packageJson.description}`);
+    const nameHeaders = [];
+    
+    // Default name from English or fallback
+    let defaultName = 'Boks Helper';
+    try {
+        const enMsgs = JSON.parse(await fs.readFile(path.join(localesDir, 'en', 'messages.json'), 'utf8'));
+        if (enMsgs.extName && enMsgs.extName.message) {
+            defaultName = enMsgs.extName.message;
+        }
+    } catch {
+        // Ignore
+    }
+    
+    descriptionHeaders.push(`// @description ${packageJson.description}`);
 
     const allMessages = {};
 
@@ -107,8 +125,19 @@ async function build() {
         try {
             const msgsContent = await fs.readFile(msgPath, 'utf8');
             const msgs = JSON.parse(msgsContent);
+            
+            // Localized Description
             if (msgs.extDescription && msgs.extDescription.message) {
                 descriptionHeaders.push(`// @description:${lang} ${msgs.extDescription.message}`);
+            }
+
+            // Localized Name
+            if (msgs.extName && msgs.extName.message) {
+                if (lang === 'en') {
+                    defaultName = msgs.extName.message; // Ensure EN is default if available
+                } else {
+                    nameHeaders.push(`// @name:${lang} ${msgs.extName.message}`);
+                }
             }
 
             // Collect messages for injection
@@ -116,7 +145,7 @@ async function build() {
             for (const key in msgs) {
                 allMessages[lang][key] = msgs[key].message;
             }
-        } catch (e) {
+        } catch {
             // Ignore
         }
     }
@@ -142,25 +171,39 @@ async function build() {
 
     console.log(`ℹ️  Injected ${usedKeys.size} translation keys for ${Object.keys(injectedMessages).length} languages`);
 
+    const parseHeader = (line) => {
+        const match = line.match(/\/\/ (@\S+)\s+(.+)/);
+        return match ? [match[1], match[2].trim()] : null;
+    };
+
+    const rawHeaders = [
+        `// @name         ${defaultName}`,
+        ...nameHeaders,
+        '// @namespace    https://github.com/thib3113/ha-boks-webextension',
+        `// @version      ${packageJson.version}`,
+        ...descriptionHeaders,
+        '// @author       Thib3113',
+        '// @match        *://*/*',
+        '// @icon         https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-48.png',
+        '// @icon64       https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-128.png',
+        '// @homepageURL  https://github.com/thib3113/ha-boks-webextension',
+        '// @supportURL   https://github.com/thib3113/ha-boks-webextension/issues?q=is%3Aissue+label%3Auserscript',
+        '// @updateURL    https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js',
+        '// @downloadURL  https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js',
+        '// @grant        GM_getValue',
+        '// @grant        GM_setValue',
+        '// @grant        GM_registerMenuCommand',
+        '// @grant        GM_notification',
+        '// @grant        GM_setClipboard',
+        '// @grant        GM_xmlhttpRequest'
+    ];
+
+    const userscriptHeaders = rawHeaders.map(parseHeader).filter(Boolean);
+    const maxHeaderLen = Math.max(...userscriptHeaders.map(h => h[0].length)) + 1;
+    const formattedHeaders = userscriptHeaders.map(h => `// ${h[0].padEnd(maxHeaderLen)} ${h[1]}`).join('\n');
+
     const userscriptBanner = `// ==UserScript==
-// @name         Boks Helper
-// @namespace    https://github.com/thib3113/ha-boks-webextension
-// @version      ${packageJson.version}
-${descriptionHeaders.join('\n')}
-// @author       Thib3113
-// @match        *://*/*
-// @icon         https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-48.png
-// @icon64       https://raw.githubusercontent.com/thib3113/ha-boks-webextension/main/src/icons/icon-128.png
-// @homepageURL  https://github.com/thib3113/ha-boks-webextension
-// @supportURL   https://github.com/thib3113/ha-boks-webextension/issues?q=is%3Aissue+label%3Auserscript
-// @updateURL    https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js
-// @downloadURL    https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_registerMenuCommand
-// @grant        GM_notification
-// @grant        GM_setClipboard
-// @grant        GM_xmlhttpRequest
+${formattedHeaders}
 // ==/UserScript==
 //
 // Build Metadata:
@@ -198,7 +241,9 @@ ${(process.env.GITHUB_RUN_ID && process.env.GITHUB_REF_NAME && process.env.GITHU
                 const destPath = path.join('dist/extension', asset);
                 try {
                     await fs.cp(srcPath, destPath, { recursive: true });
-                } catch(e) {}
+                } catch {
+                    // Ignore
+                }
             }
             const pkg = JSON.parse(await fs.readFile('package.json', 'utf8'));
             const man = JSON.parse(await fs.readFile('src/manifest.json', 'utf8'));

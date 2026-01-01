@@ -7,23 +7,23 @@ interface HAMessage {
     id?: number;
     type: string;
     success?: boolean;
-    result?: any;
+    result?: unknown;
     error?: { message: string };
     message?: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 interface PendingRequest {
-    resolve: (value: any) => void;
-    reject: (reason?: any) => void;
+    resolve: (value: unknown) => void;
+    reject: (reason: Error) => void;
 }
 
 export class HAWebSocket {
-    private baseUrl: string;
-    private token: string;
+    private readonly baseUrl: string;
+    private readonly token: string;
     private socket: WebSocket | null;
     private messageId: number;
-    private pendingRequests: Map<number, PendingRequest>;
+    private readonly pendingRequests: Map<number, PendingRequest>;
     public isConnected: boolean;
     public isAuthenticated: boolean;
 
@@ -38,16 +38,19 @@ export class HAWebSocket {
     }
 
     async connect(): Promise<void> {
-        if (this.isConnected && this.isAuthenticated) return;
+        if (this.isConnected && this.isAuthenticated) {
+            return;
+        }
 
         return new Promise((resolve, reject) => {
-            let wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/websocket";
+            const wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/websocket";
             console.log("Connecting to WebSocket:", wsUrl);
 
             try {
                 this.socket = new WebSocket(wsUrl);
-            } catch (e: any) {
-                reject(new Error(`Failed to create WebSocket: ${e.message}`));
+            } catch (e: unknown) {
+                const message = e instanceof Error ? e.message : String(e);
+                reject(new Error(`Failed to create WebSocket: ${message}`));
                 return;
             }
 
@@ -56,23 +59,23 @@ export class HAWebSocket {
                 this.isConnected = true;
             };
 
-            this.socket.onmessage = (event) => {
+            this.socket.onmessage = (event: MessageEvent) => {
                 try {
-                    const message = JSON.parse(event.data);
+                    const message = JSON.parse(event.data as string) as HAMessage;
                     this.handleMessage(message, resolve, reject);
                 } catch (e) {
                     console.error("Error processing WebSocket message:", e);
                 }
             };
 
-            this.socket.onerror = (error) => {
-                console.error("WebSocket error:", error);
+            this.socket.onerror = () => {
+                console.error("WebSocket error");
                 this.isConnected = false;
                 this.isAuthenticated = false;
                 reject(new Error("WebSocket connection error"));
             };
 
-            this.socket.onclose = (event) => {
+            this.socket.onclose = (event: CloseEvent) => {
                 console.log("WebSocket connection closed", event.code, event.reason);
                 this.isConnected = false;
                 this.isAuthenticated = false;
@@ -80,9 +83,7 @@ export class HAWebSocket {
         });
     }
 
-    private handleMessage(message: HAMessage, connectResolve?: () => void, connectReject?: (reason?: any) => void) {
-        // console.log("WS Message received:", message); // Verbose logging
-
+    private handleMessage(message: HAMessage, connectResolve?: () => void, connectReject?: (reason: Error) => void) {
         if (message.type === "auth_required") {
             this.socket?.send(JSON.stringify({
                 type: "auth",
@@ -91,30 +92,37 @@ export class HAWebSocket {
         } else if (message.type === "auth_ok") {
             console.log("Authentication successful");
             this.isAuthenticated = true;
-            if (connectResolve) connectResolve();
+            if (connectResolve) {
+                connectResolve();
+            }
         } else if (message.type === "auth_invalid") {
             console.error("Authentication failed:", message.message);
             this.isAuthenticated = false;
-            if (connectReject) connectReject(new Error(`Authentication failed: ${message.message}`));
+            if (connectReject) {
+                connectReject(new Error(`Authentication failed: ${message.message}`));
+            }
         } else if (message.type === "result") {
             const req = this.pendingRequests.get(message.id!);
             if (req) {
                 if (message.success) {
                     req.resolve(message.result);
                 } else {
-                    req.reject(new Error(message.error ? message.error.message : "Unknown error"));
+                    req.reject(new Error(message.error?.message || "Unknown error"));
                 }
                 this.pendingRequests.delete(message.id!);
             }
         }
     }
 
-    async sendRequest(type: string, payload: any = {}): Promise<any> {
+    async sendRequest<T = unknown>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
         await this.connect();
 
         return new Promise((resolve, reject) => {
             const id = this.messageId++;
-            this.pendingRequests.set(id, { resolve, reject });
+            this.pendingRequests.set(id, { 
+                resolve: (val: unknown) => resolve(val as T), 
+                reject 
+            });
 
             const message = {
                 id,
@@ -126,8 +134,8 @@ export class HAWebSocket {
         });
     }
 
-    async callService(domain: string, service: string, serviceData: any, target: any = null, returnResponse: boolean = false): Promise<any> {
-        const payload: any = {
+    async callService<T = unknown>(domain: string, service: string, serviceData: Record<string, unknown>, target: { entity_id?: string | string[] } | null = null, returnResponse = false): Promise<T> {
+        const payload: Record<string, unknown> = {
             domain,
             service,
             service_data: serviceData
@@ -138,7 +146,7 @@ export class HAWebSocket {
         if (returnResponse) {
             payload.return_response = true;
         }
-        return this.sendRequest("call_service", payload);
+        return this.sendRequest<T>("call_service", payload);
     }
 
     close() {

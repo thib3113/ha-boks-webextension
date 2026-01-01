@@ -10,10 +10,20 @@ export default [
   {
     files: ["src/**/*.ts"],
     languageOptions: {
+      parserOptions: {
+        project: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
       globals: {
         ...globals.browser,
         chrome: "readonly"
       }
+    },
+    rules: {
+      "curly": ["error", "all"],
+      "@typescript-eslint/prefer-optional-chain": "error",
+      "prefer-const": "warn",
+      "@typescript-eslint/no-explicit-any": "warn"
     }
   },
   {
@@ -32,14 +42,6 @@ export default [
     rules: {
       "no-console": "off",
       "no-alert": "off"
-    }
-  },
-  {
-    files: ["build.js"],
-    languageOptions: {
-      globals: {
-        ...globals.node
-      }
     }
   },
   {

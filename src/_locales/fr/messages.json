@@ -6,7 +6,7 @@
     "message": "Génère un code de boîte aux lettres via Home Assistant et l'insère dans le champ actif."
   },
   "menuTitle": {
-    "message": "Générer un code boks"
+    "message": "Générer un code Boks"
   },
   "promptMessage": {
     "message": "Description du colis (ex: Livres, Vêtements) :"

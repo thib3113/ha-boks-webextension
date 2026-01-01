@@ -1,3 +1,5 @@
+import { HATodoItem } from './boks-service.js';
+
 // 1. Localization Logic
 // Automatically replace textContent of elements with data-i18n attribute
 function localizeHtmlPage() {
@@ -5,9 +7,11 @@ function localizeHtmlPage() {
     for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
         const msgKey = obj.getAttribute('data-i18n');
-        const msg = chrome.i18n.getMessage(msgKey!);
-        if (msg) {
-            obj.textContent = msg;
+        if (msgKey) {
+            const msg = chrome.i18n.getMessage(msgKey);
+            if (msg) {
+                obj.textContent = msg;
+            }
         }
     }
 
@@ -15,9 +19,11 @@ function localizeHtmlPage() {
     for (let i = 0; i < placeholders.length; i++) {
         const obj = placeholders[i];
         const msgKey = obj.getAttribute('data-i18n-placeholder');
-        const msg = chrome.i18n.getMessage(msgKey!);
-        if (msg) {
-            obj.setAttribute('placeholder', msg);
+        if (msgKey) {
+            const msg = chrome.i18n.getMessage(msgKey);
+            if (msg) {
+                obj.setAttribute('placeholder', msg);
+            }
         }
     }
 }
@@ -25,7 +31,9 @@ function localizeHtmlPage() {
 // 2. Show message function
 function showMessage(text: string, isSuccess: boolean) {
     const messageElement = document.getElementById('message');
-    if (!messageElement) return;
+    if (!messageElement) {
+        return;
+    }
 
     messageElement.textContent = text;
     messageElement.className = isSuccess ? 'success' : 'error';
@@ -43,7 +51,9 @@ async function fetchAndDisplayTodoItems() {
     const todoListElement = document.getElementById('todoList');
     const noItemsElement = document.getElementById('noTodoItems');
 
-    if (!loadingElement || !todoListElement || !noItemsElement) return;
+    if (!loadingElement || !todoListElement || !noItemsElement) {
+        return;
+    }
 
     try {
         // Show loading state only if list is empty
@@ -59,13 +69,13 @@ async function fetchAndDisplayTodoItems() {
         // Send message to background script to get todo items
         const response = await chrome.runtime.sendMessage({
             action: 'GET_TODO_ITEMS'
-        });
+        }) as { success: boolean; items: { items: HATodoItem[] } | { attributes: { todo_items: HATodoItem[] } }; error?: string };
 
         // Hide loading state
         loadingElement.style.display = 'none';
         todoListElement.style.opacity = '1';
 
-        if (response && response.success) {
+        if (response?.success) {
             // Process and display todo items
             displayTodoItems(response.items);
         } else {
@@ -75,7 +85,7 @@ async function fetchAndDisplayTodoItems() {
             noItemsElement.textContent = chrome.i18n.getMessage("errorLoadingParcels");
             noItemsElement.style.display = 'block';
         }
-    } catch (error) {
+    } catch (error: unknown) {
         console.error("Error sending message to background script:", error);
         loadingElement.style.display = 'none';
         todoListElement.style.display = 'none';
@@ -84,36 +94,38 @@ async function fetchAndDisplayTodoItems() {
     }
 }
 
-interface TodoItem {
-    uid: string;
-    summary: string;
-    status: 'completed' | 'needs_action';
-    [key: string]: any;
-}
-
 // 4. Display todo items in the list
-function displayTodoItems(items: any) {
+function displayTodoItems(items: { items: HATodoItem[] } | { attributes: { todo_items: HATodoItem[] } } | Record<string, unknown>) {
     const todoListElement = document.getElementById('todoList');
     const noItemsElement = document.getElementById('noTodoItems');
 
-    if (!todoListElement || !noItemsElement) return;
+    if (!todoListElement || !noItemsElement) {
+        return;
+    }
 
     // Handle different response structures (WebSocket vs REST)
-    let todoItems: TodoItem[] = [];
-    if (items && items.items && Array.isArray(items.items)) {
+    let todoItems: HATodoItem[] = [];
+    if (items && 'items' in items && Array.isArray(items.items)) {
         // WebSocket response structure: { items: [...] }
-        todoItems = items.items;
-    } else if (items && items.attributes && items.attributes.todo_items) {
-        // REST API response structure (legacy)
-        todoItems = items.attributes.todo_items;
+        todoItems = items.items as HATodoItem[];
+    } else if (items && 'attributes' in items) {
+        const attrs = items.attributes as Record<string, unknown>;
+        if (Array.isArray(attrs.todo_items)) {
+            // REST API response structure (legacy)
+            todoItems = attrs.todo_items as HATodoItem[];
+        }
     }
 
     if (todoItems.length > 0) {
         todoItems.reverse()
         // Sort items: incomplete first
         todoItems.sort((a, b) => {
-            if (a.status === 'completed' && b.status !== 'completed') return 1;
-            if (a.status !== 'completed' && b.status === 'completed') return -1;
+            if (a.status === 'completed' && b.status !== 'completed') {
+                return 1;
+            }
+            if (a.status !== 'completed' && b.status === 'completed') {
+                return -1;
+            }
             return 0;
         });
 
@@ -153,7 +165,7 @@ function displayTodoItems(items: any) {
                         summary: item.summary
                     });
                     // Refresh list to ensure correct order
-                    fetchAndDisplayTodoItems();
+                    void fetchAndDisplayTodoItems();
                 } catch (error) {
                     console.error("Error updating item:", error);
                     // Revert on error
@@ -202,7 +214,7 @@ function displayTodoItems(items: any) {
                 copyBtn.innerHTML = '📋'; // Simple icon
                 copyBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(code!).then(() => {
+                    void navigator.clipboard.writeText(code!).then(() => {
                         const originalText = copyBtn.innerHTML;
                         copyBtn.innerHTML = '✅';
                         setTimeout(() => copyBtn.innerHTML = originalText, 1000);
@@ -230,7 +242,7 @@ function displayTodoItems(items: any) {
                             status: item.status,
                             summary: newSummary
                         });
-                        fetchAndDisplayTodoItems();
+                        void fetchAndDisplayTodoItems();
                     } catch (error) {
                         console.error("Error updating item:", error);
                         alert(chrome.i18n.getMessage("updateFailedAlert"));
@@ -278,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Check if entity_id is configured
-    chrome.storage.sync.get(['selectedTodoEntityId'], (config) => {
+    chrome.storage.sync.get(['selectedTodoEntityId'], (config: Record<string, string>) => {
         const entityId = config.selectedTodoEntityId;
 
         if (!entityId) {
@@ -297,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Fetch and display todo items
-            fetchAndDisplayTodoItems();
+            void fetchAndDisplayTodoItems();
         }
     });
 
@@ -320,12 +332,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await chrome.runtime.sendMessage({
                 action: 'ADD_PARCEL',
                 description: description
-            });
+            }) as { success: boolean; code?: string; error?: string };
 
             console.log("Popup received from background:", response);
 
             // Handle response
-            if (response && response.success) {
+            if (response?.success) {
                 const successMessage = response.code
                     ? (chrome.i18n.getMessage("successMessageWithCode", [response.code]) || `Parcel added! Code: ${response.code}`)
                     : (chrome.i18n.getMessage("successMessage") || "Parcel added successfully!");
@@ -333,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Auto-copy to clipboard
                 if (response.code) {
-                    navigator.clipboard.writeText(response.code).then(() => {
+                    void navigator.clipboard.writeText(response.code).then(() => {
                         console.log('Code copied to clipboard');
                     }).catch(err => {
                         console.error('Failed to copy code: ', err);
@@ -344,10 +356,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 descriptionInput.value = '';
 
                 // Refresh todo list
-                fetchAndDisplayTodoItems();
+                void fetchAndDisplayTodoItems();
             } else {
                 // Display specific error message if available
-                const errorMessage = response && response.error
+                const errorMessage = response?.error
                     ? response.error
                     : chrome.i18n.getMessage("errorMessage") || "Error adding parcel. Please try again.";
                 showMessage(errorMessage, false);

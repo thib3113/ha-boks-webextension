@@ -1,5 +1,6 @@
 import { HAWebSocket } from './ha-client.js';
 import { DEFAULT_HA_URL } from './const.js';
+import { HAEntity } from './boks-service.js';
 
 // 1. Localization Logic
 // Automatically replace textContent of elements with data-i18n attribute
@@ -30,7 +31,9 @@ async function fetchTodoEntities(haUrl: string, haToken: string, selectedId: str
     const entitySelect = document.getElementById('selectedTodoEntityId') as HTMLSelectElement;
     const entityError = document.getElementById('entityError');
 
-    if (!entitySelect || !entityError) return [];
+    if (!entitySelect || !entityError) {
+        return [];
+    }
 
     // Clear previous error
     entityError.textContent = '';
@@ -41,23 +44,25 @@ async function fetchTodoEntities(haUrl: string, haToken: string, selectedId: str
             action: 'GET_TODO_ENTITIES',
             haUrl: haUrl,
             haToken: haToken
-        });
+        }) as { success: boolean; entities: HAEntity[]; error?: string };
 
-        if (!response || !response.success) {
+        if (!response?.success) {
             throw new Error(response ? response.error : "Unknown error");
         }
 
         const entities = response.entities;
-        const todoEntities = entities; // Already filtered in background
+        
+        // 1. Identify Boks Entities (Registry & Fallback)
+        const boksRegistryEntities = entities.filter((e) => e.is_boks);
+        const boksNameEntities = entities.filter((e) => 
+            !e.is_boks && e.entity_id.toLowerCase().includes('boks')
+        );
+        
+        const boksEntities = [...boksRegistryEntities, ...boksNameEntities];
 
-        // Filter for todo entities with boks in entity_id or friendly_name
-        const todoEntitiesBoks = todoEntities.filter((entity: any) => {
-            // Check if entity_id starts with 'boks' (case insensitive)
-            return entity.entity_id.toLowerCase().startsWith('todo.boks');
-        });
-
-        // If no boks todo entities found, show all todo entities
-        let filteredEntities = todoEntitiesBoks.length ? todoEntitiesBoks : todoEntities;
+        // 2. Determine which list to show
+        // If we found specific Boks entities, show them. Otherwise show all.
+        const filteredEntities = boksEntities.length > 0 ? boksEntities : entities;
 
         // Populate the select dropdown
         entitySelect.innerHTML = '';
@@ -69,31 +74,44 @@ async function fetchTodoEntities(haUrl: string, haToken: string, selectedId: str
         entitySelect.appendChild(defaultOption);
 
         // Add entities to dropdown
-        filteredEntities.forEach((entity: any) => {
+        filteredEntities.forEach((entity) => {
             const option = document.createElement('option');
             option.value = entity.entity_id;
-            option.textContent = entity.attributes.friendly_name || entity.entity_id;
+            
+            let label = entity.attributes.friendly_name || entity.entity_id;
+            // Append Device Name if available
+            if (entity.boks_device_name) {
+                label = `${entity.boks_device_name} (${label})`;
+            }
+            
+            option.textContent = label;
             entitySelect.appendChild(option);
         });
 
         // Enable the select
         entitySelect.disabled = false;
 
-        // Restore selection if provided
-        if (selectedId) {
+        // 3. Auto-Selection Logic
+        // Prioritize: Passed ID > Single Registry Match > Single Name Match
+        if (selectedId && filteredEntities.some((e) => e.entity_id === selectedId)) {
             entitySelect.value = selectedId;
+        } else if (boksRegistryEntities.length === 1) {
+            entitySelect.value = boksRegistryEntities[0].entity_id;
+        } else if (boksRegistryEntities.length === 0 && boksNameEntities.length === 1) {
+             entitySelect.value = boksNameEntities[0].entity_id;
         }
 
         // Show message if no boks entities found
-        if (todoEntities.length === 0 && filteredEntities.length > 0) {
+        if (boksEntities.length === 0) {
             entityError.textContent = chrome.i18n.getMessage('noBoksTodoEntities') ||
                 'No Boks Todo entities found. Showing all Todo entities.';
         }
 
         return filteredEntities;
-    } catch (error: any) {
-        console.error('Error fetching entities:', error);
-        entityError.textContent = `${chrome.i18n.getMessage('errorFetchingEntities') || 'Error fetching entities'}: ${error.message}`;
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Error fetching entities:', message);
+        entityError.textContent = `${chrome.i18n.getMessage('errorFetchingEntities') || 'Error fetching entities'}: ${message}`;
         entitySelect.disabled = true;
         return [];
     }
@@ -101,7 +119,7 @@ async function fetchTodoEntities(haUrl: string, haToken: string, selectedId: str
 
 // 2. Save Logic
 const saveOptions = () => {
-    let haUrlInput = document.getElementById('haUrl') as HTMLInputElement;
+    const haUrlInput = document.getElementById('haUrl') as HTMLInputElement;
     let haUrl = haUrlInput.value.trim();
     const haToken = (document.getElementById('haToken') as HTMLInputElement).value.trim();
     const selectedTodoEntityId = (document.getElementById('selectedTodoEntityId') as HTMLSelectElement).value;
@@ -131,13 +149,18 @@ let currentTestHA: HAWebSocket | null = null;
 
 // Test Connection Logic
 const testConnection = async () => {
-    let haUrl = (document.getElementById('haUrl') as HTMLInputElement).value.trim();
+    const haUrlInput = (document.getElementById('haUrl') as HTMLInputElement);
+    let haUrl = haUrlInput.value.trim();
     const haToken = (document.getElementById('haToken') as HTMLInputElement).value.trim();
     const status = document.getElementById('status');
     
-    if (!status) return;
+    if (!status) {
+        return;
+    }
 
-    if (!haUrl) haUrl = DEFAULT_HA_URL;
+    if (!haUrl) {
+        haUrl = DEFAULT_HA_URL;
+    }
 
     if (!haToken) {
         status.textContent = chrome.i18n.getMessage("enterHaConfig");
@@ -176,24 +199,21 @@ const testConnection = async () => {
         } else {
              throw new Error("Not authenticated");
         }
-    } catch (error: any) {
+    } catch (error: unknown) {
         // 4. Check if we are still the active instance
         if (ha !== currentTestHA) {
             console.log("Ignoring error from cancelled connection");
             return;
         }
-        console.error("Connection test failed:", error);
-        status.textContent = chrome.i18n.getMessage("connectionFailed", [error.message]);
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("Connection test failed:", message);
+        status.textContent = chrome.i18n.getMessage("connectionFailed", [message]);
         status.style.color = "red";
     } finally {
         // Only close if it's the current one and we are done testing
-        // OR if we want to clean up the test connection immediately after success/fail
-        // Usually good practice to close test connections
         if (ha === currentTestHA) {
             ha.close();
             currentTestHA = null;
-        } else {
-            // It was already closed/replaced, nothing to do
         }
     }
 };
@@ -202,7 +222,7 @@ const testConnection = async () => {
 const restoreOptions = () => {
     chrome.storage.sync.get(
         { haUrl: DEFAULT_HA_URL, haToken: '', selectedTodoEntityId: '' },
-        (items) => {
+        (items: Record<string, string>) => {
             (document.getElementById('haUrl') as HTMLInputElement).value = items.haUrl;
             (document.getElementById('haToken') as HTMLInputElement).value = items.haToken;
             // Set value here too, in case fetch fails or takes time (it will show empty if not in list yet, but good practice)
@@ -211,16 +231,16 @@ const restoreOptions = () => {
             // If we have URL and token, fetch entities
             if (items.haUrl && items.haToken) {
                 // Pass the saved entity ID so it can be re-selected after fetching
-                fetchTodoEntities(items.haUrl, items.haToken, items.selectedTodoEntityId);
+                void fetchTodoEntities(items.haUrl, items.haToken, items.selectedTodoEntityId);
             }
         }
     );
 };
 
 // Debounce function to limit API calls
-function debounce(func: Function, wait: number) {
+function debounce<T extends (...args: unknown[]) => void>(func: T, wait: number) {
     let timeout: NodeJS.Timeout;
-    return function executedFunction(...args: any[]) {
+    return function executedFunction(...args: Parameters<T>) {
         const later = () => {
             clearTimeout(timeout);
             func(...args);
@@ -236,19 +256,25 @@ function setupEntityFetching() {
     const haTokenInput = document.getElementById('haToken') as HTMLInputElement;
     const entitySelect = document.getElementById('selectedTodoEntityId') as HTMLSelectElement;
 
-    if (!haUrlInput || !haTokenInput || !entitySelect) return;
+    if (!haUrlInput || !haTokenInput || !entitySelect) {
+        return;
+    }
 
     // Function to handle input changes with debounce
-    const handleInputChange = debounce(() => {
+    const handleInputChange = debounce<() => void>(() => {
         let haUrl = haUrlInput.value.trim();
         const haToken = haTokenInput.value.trim();
 
         // Use default if empty (visual feedback logic handled elsewhere, but for fetching we need a value)
-        if (!haUrl) haUrl = DEFAULT_HA_URL;
+        if (!haUrl) {
+            haUrl = DEFAULT_HA_URL;
+        }
 
         // Clear any previous connection status messages as config has changed
         const status = document.getElementById('status');
-        if (status) status.textContent = '';
+        if (status) {
+            status.textContent = '';
+        }
 
         if (haUrl && haToken) {
             // Enable the select and show loading state
@@ -257,7 +283,7 @@ function setupEntityFetching() {
             localizeHtmlPage(); // Apply localization to new elements
 
             // Fetch entities
-            fetchTodoEntities(haUrl, haToken);
+            void fetchTodoEntities(haUrl, haToken);
         } else {
             // Disable the select if we don't have required info
             entitySelect.disabled = true;
@@ -284,6 +310,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('testConnection')?.addEventListener('click', (e) => {
         e.preventDefault();
-        testConnection();
+        testConnection().catch(err => console.error(err));
     });
 });

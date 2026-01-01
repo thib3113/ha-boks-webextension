@@ -8,7 +8,7 @@ export class HAHttpClient {
         this.token = token;
     }
 
-    private async fetch(endpoint: string, options: RequestInit = {}): Promise<any> {
+    private async fetch<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
         const url = `${this.baseUrl}/api/${endpoint}`;
         const headers = {
             "Authorization": `Bearer ${this.token}`,
@@ -22,31 +22,32 @@ export class HAHttpClient {
             throw new Error(`HTTP Error ${response.status}: ${response.statusText}`);
         }
 
-        return response.json();
+        return await response.json() as T;
     }
 
-    async callService(domain: string, service: string, serviceData: any, target: any = null, returnResponse: boolean = false): Promise<any> {
-        const payload: any = {
+    async callService<T = unknown>(domain: string, service: string, serviceData: Record<string, unknown>, target: { entity_id?: string | string[] } | null = null, returnResponse = false): Promise<T> {
+        const payload: Record<string, unknown> = {
             ...serviceData
         };
 
         if (target) {
-            // Flatten target into payload if needed, or send as separate object
-            // HA REST API expects target in the body, but mixed with data?
-            // Actually usually it's { entity_id: "..." } inside the body for simple calls.
-            // If target is complex object:
             if (target.entity_id) {
                 payload.entity_id = target.entity_id;
             }
         }
 
-        return this.fetch(`services/${domain}/${service}`, {
+        let url = `services/${domain}/${service}`;
+        if (returnResponse) {
+            url += "?return_response=true";
+        }
+
+        return this.fetch<T>(url, {
             method: "POST",
             body: JSON.stringify(payload)
         });
     }
 
-    async getStates(): Promise<any[]> {
-        return this.fetch("states");
+    async getStates<T = unknown>(): Promise<T> {
+        return this.fetch<T>("states");
     }
 }

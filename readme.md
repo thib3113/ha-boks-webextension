@@ -14,7 +14,21 @@ This repository contains the "ha-boks" browser extension. Release artifacts avai
 I will publish the extension on the Chrome Web Store later — a link will be added to the Releases when available.
 
 Important requirement
-This extension requires a running "boks" installation able to generate codes. The extension expects you to configure a valid boks instance and provide the required credentials/keys (configurationKey / masterKey) so it can request/generated codes. Make sure the boks endpoint and keys are set up and kept secure (do not expose masterKey publicly).
+This extension requires a running "boks" installation able to generate codes, specifically via the **ha-boks** Home Assistant integration: [https://github.com/thib3113/ha-boks](https://github.com/thib3113/ha-boks). The extension expects you to configure a valid boks instance and provide the required credentials/keys (configurationKey / masterKey) so it can request/generated codes. Make sure the boks endpoint and keys are set up and kept secure (do not expose masterKey publicly).
+
+## Userscript (Alternative)
+
+If you cannot install browser extensions (e.g., due to corporate restrictions) or prefer a lighter solution, a **Userscript** is available.
+
+**Why use it?**
+- Works in environments where extensions are blocked.
+- Lighter weight.
+- Updates automatically if your userscript manager supports it.
+
+**How to use:**
+1. Install a userscript manager like **Tampermonkey** or **Violentmonkey**.
+2. **[Click here to install the Boks Userscript](https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js)**.
+   *(Or manually download `boks.user.js` from the Release assets)*.
 
 ---
 
@@ -75,7 +89,21 @@ Ce dépôt contient l'extension "ha-boks". Les artefacts disponibles dans les Re
 Un lien vers le Chrome Web Store sera ajouté ultérieurement.
 
 Prérequis important
-L'extension nécessite une installation "boks" opérationnelle capable de générer des codes. Vous devez configurer l'URL de votre instance boks et fournir les identifiants/clefs requis (configurationKey / masterKey). Conservez ces clefs en sécurité.
+L'extension nécessite une installation "boks" opérationnelle capable de générer des codes, via l'intégration Home Assistant **ha-boks** : [https://github.com/thib3113/ha-boks](https://github.com/thib3113/ha-boks). Vous devez configurer l'URL de votre instance boks et fournir les identifiants/clefs requis (configurationKey / masterKey). Conservez ces clefs en sécurité.
+
+## Userscript (Alternative)
+
+Si vous ne pouvez pas installer d'extensions (ex: restrictions d'entreprise) ou préférez une solution plus légère, un **Userscript** est disponible.
+
+**Pourquoi l'utiliser ?**
+- Fonctionne là où les extensions sont bloquées.
+- Plus léger.
+- Mise à jour automatique (selon votre gestionnaire).
+
+**Comment l'utiliser :**
+1. Installez un gestionnaire comme **Tampermonkey** ou **Violentmonkey**.
+2. **[Cliquez ici pour installer le Userscript Boks](https://github.com/thib3113/ha-boks-webextension/releases/latest/download/boks.user.js)**.
+   *(Ou téléchargez manuellement `boks.user.js` depuis les Releases)*.
 
 Installation (utilisateur)
 

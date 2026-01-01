@@ -26,11 +26,13 @@ chrome.contextMenus.onClicked.addListener((info: chrome.contextMenus.OnClickData
  * 4. Insert result
  */
 async function handleMenuClick(tab: chrome.tabs.Tab) {
-    if (!tab.id) return;
+    if (!tab.id) {
+        return;
+    }
     try {
         // 1. Prompt user for description
         const promptMsg = chrome.i18n.getMessage("promptMessage");
-        let promptDefault = chrome.i18n.getMessage("promptDefault");
+        const promptDefault = chrome.i18n.getMessage("promptDefault");
 
         const inputResult = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
@@ -39,7 +41,9 @@ async function handleMenuClick(tab: chrome.tabs.Tab) {
         });
 
         const description = inputResult[0].result;
-        if (description === null) return;
+        if (description === null) {
+            return;
+        }
 
         // 2. Get configuration
         const config = await chrome.storage.sync.get(['haUrl', 'haToken', 'selectedTodoEntityId']);
@@ -64,16 +68,18 @@ async function handleMenuClick(tab: chrome.tabs.Tab) {
             });
         }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Workflow failed:", err);
         let errorMsg = chrome.i18n.getMessage("errorNetwork");
-        if(err.message) errorMsg += " (" + err.message + ")";
-        alertUser(tab.id!, errorMsg);
+        if(err instanceof Error && err.message) {
+            errorMsg += " (" + err.message + ")";
+        }
+        alertUser(tab.id, errorMsg);
     }
 }
 
 // Listener for messages from popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     (async () => {
         try {
             if (request.action === "GET_TODO_ENTITIES") {
@@ -100,12 +106,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const items = await service.getTodoItems();
                 sendResponse({ success: true, items });
             } else if (request.action === "UPDATE_TODO_ITEM") {
-                await service.updateTodoItem(request.uid, request.status, request.summary);
+                await service.updateTodoItem(request.uid, request.status);
                 sendResponse({ success: true });
             }
-        } catch (error: any) {
-             console.error(`Error in ${request.action}:`, error);
-             sendResponse({ success: false, error: error.message });
+        } catch (error: unknown) {
+             const message = error instanceof Error ? error.message : String(error);
+             console.error(`Error in ${request.action}:`, message);
+             sendResponse({ success: false, error: message });
         }
     })();
     return true; // Keep channel open
