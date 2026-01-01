@@ -42,4 +42,4 @@ We may update our Privacy Policy from time to time. We will notify you of any ch
 ## 5. Contact Us
 
 If you have any questions about this Privacy Policy, please contact us via our GitHub repository:
-[https://github.com/thib3113/boks](https://github.com/thib3113/boks)
+[https://github.com/thib3113/ha-boks-webextension](https://github.com/thib3113/ha-boks-webextension)
