@@ -39,7 +39,7 @@ Pick the file for your browser from the Release assets.
 Chrome-like browsers (recommended)
 "Chrome-like" means Chromium and popular Chromium-based browsers (examples: Google Chrome, Microsoft Edge, Brave, Opera, Vivaldi).
 
-- For end users (recommended): install via the Chrome Web Store when the listing is available (link will be added to releases).
+- For end users (recommended): [install via the Chrome Web Store](https://chromewebstore.google.com/detail/ha-boks-extension/ooncmebodohcpmljlgpbhoeobcandnaf)
 - For testers / advanced users now:
   1. Open the browser extensions page (e.g. chrome://extensions).
   2. Enable "Developer mode".
