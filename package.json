@@ -22,7 +22,7 @@
   },
   "homepage": "https://github.com/thib3113/ha-boks-webextension#readme",
   "devDependencies": {
-    "@types/chrome": "0.1.37",
+    "@types/chrome": "0.1.38",
     "@types/node": "25.5.0",
     "esbuild": "0.27.4",
     "eslint": "10.0.3",
